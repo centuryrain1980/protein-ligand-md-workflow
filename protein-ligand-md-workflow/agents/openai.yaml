@@ -1,0 +1,3 @@
+interface:
+  display_name: "蛋白-配体 MD 全流程"
+  short_description: "对接、力场选型、建模参数化到生产 MD 与 MM/PBSA 的一体化分子动力学工作流"

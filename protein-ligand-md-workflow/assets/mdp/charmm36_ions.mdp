@@ -1,0 +1,22 @@
+; 加离子用的最小化设置 (CHARMM36)
+; 仅用于生成 genion 所需的 tpr, 不需要真正收敛
+
+integrator     = steep
+emtol          = 10.0
+emstep         = 0.01
+nsteps         = 50000
+energygrps     = System
+
+nstlist        = 10
+cutoff-scheme  = Verlet
+coulombtype    = PME
+rcoulomb       = 1.2      ; Verlet 下 rcoulomb 必须 >= rvdw
+rvdw           = 1.2      ; 必须 > rvdw-switch, 否则 grompp 报错
+pbc            = xyz
+
+; --- CHARMM36 必需项 ---
+vdwtype        = cutoff
+vdw-modifier   = force-switch
+rlist          = 1.2
+rvdw-switch    = 1.0
+DispCorr       = no

@@ -1,0 +1,28 @@
+; 能量最小化 —— CHARMM36 蛋白-配体复合体
+; 依据: GROMACS 官方手册 "Force fields in GROMACS" 给出的 CHARMM36 强制 mdp 设置
+;   https://manual.gromacs.org/current/user-guide/force-fields.html
+; CHARMM36 关键差异(相对通用模板):
+;   vdwtype = cutoff + vdw-modifier = force-switch + rvdw-switch = 1.0
+;   DispCorr = no  (force-switch 自带处理, 不加色散校正)
+;   rlist = 1.2
+; 注: 本模板要求已安装 charmm36.ff (见 references/force-fields.md 第 4.2 节)
+
+integrator     = steep          ; steepest descent
+emtol          = 10.0           ; 收敛阈值 kJ/mol/nm
+emstep         = 0.01
+nsteps         = 50000
+energygrps     = System
+
+nstlist        = 10
+cutoff-scheme  = Verlet
+coulombtype    = PME
+rcoulomb       = 1.2      ; Verlet 下 rcoulomb 必须 >= rvdw
+rvdw           = 1.2      ; 必须 > rvdw-switch, 否则 grompp 报错
+pbc            = xyz
+
+; --- CHARMM36 必需项 ---
+vdwtype        = cutoff
+vdw-modifier   = force-switch
+rlist          = 1.2
+rvdw-switch    = 1.0
+DispCorr       = no

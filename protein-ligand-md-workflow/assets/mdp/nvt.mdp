@@ -1,0 +1,48 @@
+; NVT 平衡 —— 蛋白-配体复合体
+; GROMACS 2025 修正: comm-mode=Linear + comm-grps=System
+;   (旧写法 Angular + Protein 会产生 2 个警告并导致 grompp 失败)
+
+title                   = Protein-ligand complex NVT equilibration
+define                  = -DPOSRES          ; 位置限制蛋白
+
+integrator              = md
+nsteps                  = 50000             ; 100 ps @ 2 fs
+dt                      = 0.002
+
+nstxout                 = 0                 ; 不存全精度坐标
+nstvout                 = 0                 ; 不存速度
+nstenergy               = 500
+nstlog                  = 500
+nstxout-compressed      = 500               ; 压缩轨迹, 每 1 ps
+compressed-x-grps       = System
+
+comm-mode               = Linear            ; 周期体系中不要用 Angular
+comm-grps               = System            ; 全部原子一个组
+
+continuation            = no
+constraint_algorithm    = lincs
+constraints             = h-bonds
+lincs_iter              = 1
+lincs_order             = 4
+
+cutoff-scheme           = Verlet
+nstlist                 = 10
+rcoulomb                = 1.2
+rvdw                    = 1.2
+
+coulombtype             = PME
+pme_order               = 4
+fourierspacing          = 0.16
+
+tcoupl                  = V-rescale
+tc-grps                 = Water Non-Water   ; 组名大小写不敏感
+tau_t                   = 0.1 0.1
+ref_t                   = 300 300
+
+pcoupl                  = no
+pbc                     = xyz
+DispCorr                = EnerPres
+
+gen_vel                 = yes
+gen_temp                = 300
+gen_seed                = -1

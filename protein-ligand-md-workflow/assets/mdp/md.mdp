@@ -1,0 +1,54 @@
+; 生产 MD —— 蛋白-配体复合体
+; GROMACS 2025 修正: comm-mode=Linear + comm-grps=System
+; 取消 define = -DPOSRES 以放开位置限制
+
+title                   = Protein-ligand complex production MD
+
+integrator              = md
+nsteps                  = 50000000          ; 100 ns @ 2 fs
+dt                      = 0.002
+
+nstxout                 = 0                 ; 关掉全精度轨迹
+nstvout                 = 0
+nstenergy               = 5000              ; 每 10 ps
+nstlog                  = 5000
+nstxout-compressed      = 5000              ; 每 10 ps 一帧压缩轨迹
+compressed-x-grps       = System
+
+; 做结合能分析时打开下面这行, .edr 里会出现组间能量项
+; energygrps             = Protein LIG Protein_LIG
+
+comm-mode               = Linear
+comm-grps               = System
+
+continuation            = yes
+constraint_algorithm    = lincs
+constraints             = h-bonds
+lincs_iter              = 1
+lincs_order             = 4
+
+cutoff-scheme           = Verlet
+nstlist                 = 10
+rcoulomb                = 1.2
+rvdw                    = 1.2
+
+coulombtype             = PME
+pme_order               = 4
+fourierspacing          = 0.16
+
+tcoupl                  = V-rescale
+tc-grps                 = Water Non-Water
+tau_t                   = 0.1 0.1
+ref_t                   = 300 300
+
+pcoupl                  = Parrinello-Rahman
+pcoupltype              = isotropic
+tau_p                   = 2.0
+ref_p                   = 1.0
+compressibility         = 4.5e-5
+refcoord_scaling        = com
+
+pbc                     = xyz
+DispCorr                = EnerPres
+
+gen_vel                 = no

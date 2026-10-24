@@ -1,0 +1,45 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ---- 分子动力学产物(绝不入库) ----
+*.xtc
+*.trr
+*.tpr
+*.cpt
+*.edr
+*.gro
+*.top
+*.itp
+*.ndx
+*.mdp.bak
+*.log
+*.out
+*.xvg
+*.xpm
+*.mdin
+GMXMMPBSA*
+grompp.*
+mdout.*
+
+# ---- 对接产物 ----
+*.pdbqt
+*.sdf
+docked.*
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*~
+*.swp
+
+# ---- 敏感信息(重要: 绝不要提交) ----
+.env
+*.token
+*credentials*
+*secret*

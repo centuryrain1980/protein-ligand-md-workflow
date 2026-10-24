@@ -1,0 +1,52 @@
+; NVT 平衡 —— CHARMM36 蛋白-配体复合体
+; 依据: GROMACS 官方手册 CHARMM36 强制 mdp 设置
+; GROMACS 2025 修正: comm-mode=Linear + comm-grps=System
+
+title                   = Protein-ligand complex NVT equilibration (CHARMM36)
+define                  = -DPOSRES          ; 位置限制蛋白
+
+integrator              = md
+nsteps                  = 50000             ; 100 ps @ 2 fs
+dt                      = 0.002
+
+nstxout                 = 0
+nstvout                 = 0
+nstenergy               = 500
+nstlog                  = 500
+nstxout-compressed      = 500
+compressed-x-grps       = System
+
+comm-mode               = Linear
+comm-grps               = System
+
+continuation            = no
+constraint_algorithm    = lincs
+constraints             = h-bonds
+lincs_iter              = 1
+lincs_order             = 4
+
+; --- CHARMM36 必需项 ---
+cutoff-scheme           = Verlet
+nstlist                 = 10
+coulombtype             = PME
+rcoulomb                = 1.2
+vdwtype                 = cutoff
+vdw-modifier            = force-switch
+rlist                   = 1.2
+rvdw                    = 1.2
+rvdw-switch             = 1.0
+DispCorr                = no
+pme_order               = 4
+fourierspacing          = 0.16
+
+tcoupl                  = V-rescale
+tc-grps                 = Water Non-Water
+tau_t                   = 0.1 0.1
+ref_t                   = 300 300
+
+pcoupl                  = no
+pbc                     = xyz
+
+gen_vel                 = yes
+gen_temp                = 300
+gen_seed                = -1

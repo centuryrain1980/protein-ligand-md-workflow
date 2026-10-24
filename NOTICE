@@ -1,0 +1,59 @@
+NOTICE
+======
+
+protein-ligand-md-workflow
+Copyright (C) 2026 centuryrain1980
+
+This product includes software developed by third parties, as detailed below.
+
+---------------------------------------------------------------------------
+1. Derivative work statement (important)
+---------------------------------------------------------------------------
+
+The molecular dynamics parameter templates shipped in
+
+    protein-ligand-md-workflow/assets/mdp/{em,ions,nvt,npt,md}.mdp
+
+are DERIVED FROM the DuIvyTools templates (DuIvyTools/data/mdps/*.mdp),
+which are licensed under the GNU General Public License version 3 (GPL-3.0).
+
+They have been modified by this project to be compatible with GROMACS 2025
+(e.g. comm-mode / comm-grps correction, explicit nstxout-compressed, removal
+of deprecated options, removal of the position-restraint define for the
+production run, and zero-warning verification with `gmx grompp`).
+
+Because those files are derivative works of a GPL-3.0 program, this entire
+repository is distributed under the GNU General Public License version 3.
+See the LICENSE file for the full license text.
+
+---------------------------------------------------------------------------
+2. Third-party components referenced (not bundled in this repository)
+---------------------------------------------------------------------------
+
+GROMACS            https://www.gromacs.org/            GPL-3.0
+DuIvyTools         https://github.com/CharlesHahn/DuIvyTools
+                                                    GPL-3.0
+acpype             https://github.com/alanxw/acpype    GPL-2.0
+gmx_MMPBSA         https://github.com/Valdes-Tresanco-MS/gmx_MMPBSA
+                                                    GPL-3.0
+gnina              https://github.com/gnina/gnina      Apache-2.0
+AutoDock Vina      https://github.com/ccsb-scripps/AutoDock-Vina
+                                                    Apache-2.0
+Open Babel         https://openbabel.org/              MPL-2.0
+meeko              https://github.com/forlilab/Meeko   LGPL-3.0
+AmberTools         https://ambermd.org/                Apache-2.0
+
+The scripts in protein-ligand-md-workflow/scripts/ invoke these tools at
+runtime. None of them are redistributed here; please install them from their
+official sources and comply with their respective licenses.
+
+---------------------------------------------------------------------------
+3. Reference environment used for validation
+---------------------------------------------------------------------------
+
+GROMACS 2025.4 (AVX2_256), DuIvyTools 0.6.0, acpype 2026.10.15,
+gmx_MMPBSA 1.7.0, gnina 1.3.3, AutoDock Vina 1.2.7, Open Babel 3.1.0,
+AmberTools 26.0, Python 3.12.
+
+All mdp templates in assets/mdp/ were verified with `gmx grompp` to produce
+zero warnings and zero errors on GROMACS 2025.4.

@@ -1,0 +1,15 @@
+; 能量最小化 —— 蛋白-配体复合体
+; 修正点: GROMACS 2025 警告即错误, 此模板不产生任何警告
+
+integrator     = steep          ; steepest descent
+emtol          = 10.0           ; 收敛阈值 kJ/mol/nm
+emstep         = 0.01
+nsteps         = 50000
+energygrps     = System
+
+nstlist        = 10
+cutoff-scheme  = Verlet
+coulombtype    = PME
+rcoulomb       = 1.0
+rvdw           = 1.0
+pbc            = xyz

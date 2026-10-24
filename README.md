@@ -346,50 +346,54 @@ python3 merge_gaff_ff.py \
 > `Atomtype c3 not found` 或 `Syntax error`。而且 GROMACS 2025 把原子类型拆在
 > `ffnonbonded.itp` 和 `atomtypes.atp` **两个文件**里，脚本两个都会写。
 
-### 4. CHARMM 体系（重要：CHARMM36 在 GROMACS 2025 上有兼容性问题）
+### 4. CHARMM 体系（charmm36 需要打一个段名补丁）
 
-> **实测结论**：MacKerell 官方提供的 `charmm36.ff`（jul2022，含 `charmm36_ljpme` 变体）
-> **无法用 GROMACS 2025 的 `pdb2gmx` 建拓扑**，报
+> **实测结论**：CHARMM36 **可以**在 GROMACS 2025 上正常使用，
+> 但 MacKerell 原始的 `charmm36.ff` 直接跑 `pdb2gmx` 会报
 > `Fatal error: atom C1 not found in buiding block 1MET while combining tdb and rtp`。
-> 原因是 CHARMM36 的 `aminoacids.rtp` 没有 GROMACS 2024+ 所需的末端残基变体块。
-> （另注：`charmm36.ff` 的水模型名是 `tip3p`，而 `charmm27.ff` 的是 `tips3p`，别混。）
+> **根因已定位**：`charmm36.ff/ethers.n.tdb` 里的段名 `[ MET1 ]` / `[ HYD1 ]`
+> 在 CHARMM 里表示"比标准残基多一个原子的变体"（醚连接糖脂头基），
+> 在 GROMACS 里却被当成"给蛋白 MET/HYD 用的末端补丁" → 误套到蛋白的 MET 上
+> → 补丁要连接的 `C1` 原子在蛋白 MET 里不存在 → fatal。
+>
+> **这不是 GROMACS 2024/2025 引入的问题**（实测 v2023.5 的 `pdb2top.cpp` 代码完全相同），
+> 只是 CHARMM36 通常经 CHARMM-GUI 建模、绕开了 `pdb2gmx`，所以很少有人撞上。
+>
+> **一行 sed 即可修复**（段名必须改成**不以 MET/HYD 开头**的名字，否则仍会失败）：
+>
+> ```bash
+> sed -i 's/\[ MET1 \]/[ ETHERS_MET1 ]/; s/\[ HYD1 \]/[ ETHERS_HYD1 ]/' \
+>       charmm36.ff/ethers.n.tdb
+> ```
+>
+> 修复后本机实测：`pdb2gmx` / `solvate` / `genion` / 5 个 CHARMM mdp 模板的 `grompp`
+> **全部 exit=0、WARNING=0、ERROR=0**，N 端 NH3+ 电荷正确。
+> 代价：**醚连接糖脂的末端补丁失效**（那种体系请走 CHARMM-GUI）。
 
-#### charmm27.ff vs charmm36.ff：到底差在哪（本机逐项实测）
-
-| 维度 | charmm27.ff | charmm36.ff |
-|---|---|---|
-| 蛋白参数来源 | **CHARMM22 + CMAP**（"27" 指的是脂质版本，蛋白还是 22） | **CHARMM36**（`par_all36m_prot.prm`） |
-| **蛋白原子 LJ（σ/ε）** | 基准 | **完全相同** |
-| **蛋白原子电荷** | 基准 | **307 个里 293 个相同**，只有**色氨酸**改了 14 个原子 |
-| 正二面角 | 587 条 | 共有 458 条里 **46 条（10%）不同** |
-| **CMAP 骨架修正** | **6 项** | **24 项**（4 倍） |
-| **小分子** | 无 | **CGenFF 4.6** |
-| 核酸/脂质 | CHARMM22 时代 / CHARMM27 | 全部重做 |
-
-**结论**：蛋白部分差异其实很小（对结合自由能影响约 1–2 kcal/mol 量级），
-**真正的差别在配套** —— CHARMM36 自带 CGenFF，小分子和蛋白是一套自洽参数。
-⚠️ 但**别混用**（蛋白 charmm27 + 配体 CGenFF-36，或蛋白 36 + 配体 GAFF）。
-
-完整对比（含逐原子电荷表、具体改了哪些二面角）见
-`references/force-fields.md` 第 4.3 节。
-
-**方案 A（推荐，已验证）—— 用 GROMACS 自带的 `charmm27.ff`**
-
-CHARMM27 蛋白力场 + CHARMM modified TIP3P 水，GROMACS 官方移植并支持。
-本 skill 的 `assets/mdp/charmm36_*.mdp` 就是按它验证的（`grompp` 零警告零错误）：
+**方案 A（推荐，已实测）—— `charmm36.ff` + 打补丁**
 
 ```bash
-gmx pdb2gmx -f receptor.pdb -o protein.gro -i posre.itp -p topol.top \
-            -ff charmm27 -water tips3p -ignh < /dev/null
+gmx pdb2gmx -f receptor.pdb -o protein.gro -i posre.itp -p topol.top \\
+            -ff charmm36 -water tip3p -ignh < /dev/null
 ```
+
+> 水模型名是 **`tip3p`**（CHARMM modified TIP3P）；
+> `charmm27.ff` 里才叫 **`tips3p`**，别混。
 
 mdp **必须**换成 `assets/mdp/charmm36_*.mdp`（官方 10 项强制参数已配好）。
 
-**方案 B —— 用 CHARMM-GUI 建模**，直接产出 GROMACS 拓扑，跳过 `pdb2gmx`。
+**方案 B —— 用 GROMACS 自带的 `charmm27.ff`**（免打补丁，开箱可用）
 
-**方案 C —— 降级 GROMACS 到 2023 及更早**，只有在确实需要 CHARMM36 参数时才值得。
+```bash
+gmx pdb2gmx -f receptor.pdb -o protein.gro -i posre.itp -p topol.top \\
+            -ff charmm27 -water tips3p -ignh < /dev/null
+```
 
-如果只是想拿到 CHARMM36 的力场文件本身：
+但它没有配套的通用小分子力场（**无 CGenFF**），蛋白参数也还是 CHARMM22。
+
+**方案 C —— CHARMM-GUI 建模**：社区标准做法，需要糖脂/特殊修饰时用这个。
+
+#### 怎么拿到 CHARMM36 的力场文件
 
 ```bash
 mkdir -p ~/apps/charmm36 && cd ~/apps/charmm36
@@ -397,8 +401,12 @@ curl -fLO "https://mackerell.umaryland.edu/download.php?filename=CHARMM_ff_param
 tar xzf toppar_c36_feb26.tgz
 tar xzf toppar/non_charmm/gromacs/charmm36-jul2022.ff.tgz
 mv charmm36-jul2022.ff charmm36.ff
+# 【必须】打段名补丁
+sed -i 's/\[ MET1 \]/[ ETHERS_MET1 ]/; s/\[ HYD1 \]/[ ETHERS_HYD1 ]/' charmm36.ff/ethers.n.tdb
 sudo cp -r charmm36.ff /usr/local/share/gromacs/top/     # 或免 sudo: export GMXLIB=...:$HOME/apps/charmm36
 ```
+
+> `scripts/install_all.sh --with-charmm36` **会自动完成下载 + 打补丁**。
 
 ### 5. MM/PBSA（`scripts/run_mmpbsa.sh`）
 
@@ -461,10 +469,9 @@ bash analyze.sh <工作目录>
   `*********`，gmx_MMPBSA 解析时直接 `ValueError` 崩掉。AMBER 系是原生转换，无此问题。
 - **力场与水模型必须成套选**：蛋白用 AMBER 配 `tip3p`，CHARMM27 配 `tips3p`。
 - **CHARMM 必须换一整套 mdp**（官方 10 项），不能只改 `-ff`。
-- ⚠️ **CHARMM36（MacKerell 官方 `charmm36.ff`）与 GROMACS 2025 的 `pdb2gmx` 不兼容**，
-  实测报 `atom C1 not found in buiding block 1MET while combining tdb and rtp`。
-  GROMACS 2025 上做 CHARMM 请用自带的 `charmm27.ff`（已验证），
-  或用 CHARMM-GUI 建模，或降级 GROMACS。详见下文「分模块使用说明 → 4. CHARMM 体系」。
+- ⚠️ **MacKerell 的 `charmm36.ff` 要先打段名补丁**（`ethers.n.tdb` 的 `[ MET1 ]`/`[ HYD1 ]`
+  会被 GROMACS 误当成蛋白末端补丁）。打完即可在 GROMACS 2025 上正常用，
+  详见下文「分模块使用说明 → 4. CHARMM 体系」。
 - **GROMOS 不建议用于定量自由能计算**（官方手册有明确警告）。
 
 ---

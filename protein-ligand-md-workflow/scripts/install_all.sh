@@ -298,6 +298,17 @@ if [ "$WITH_CHARMM36" -eq 1 ]; then
         else
           rm -rf "$CDIR/charmm36.ff"
           cp -r "$SRCDIR" "$CDIR/charmm36.ff"
+          # ---- 关键修复: ethers.n.tdb 的段名 [ MET1 ] / [ HYD1 ] 与 GROMACS 的 tdb 命名约定冲突 ----
+          #   CHARMM 里 MET1/HYD1 = "比标准残基多一个原子"的变体(醚连接糖脂头基)
+          #   GROMACS 里段名会被当成"给 MET/HYD 残基用的末端补丁",
+          #   于是把醚脂质的补丁误套到蛋白的 MET 上 -> 报
+          #   "atom C1 not found in buiding block 1MET while combining tdb and rtp"
+          #   改名(而不是删文件)可保留 ethers 的其余段
+          if [ -f "$CDIR/charmm36.ff/ethers.n.tdb" ]; then
+            sed -i 's/\[ MET1 \]/[ ETHERS_MET1 ]/; s/\[ HYD1 \]/[ ETHERS_HYD1 ]/' \
+                   "$CDIR/charmm36.ff/ethers.n.tdb"
+            log "已修复 ethers.n.tdb 的段名冲突 (MET1/HYD1 -> ETHERS_MET1/ETHERS_HYD1)"
+          fi
           log "CHARMM36 力场文件已装到 $CDIR/charmm36.ff"
           echo "        免 sudo 使用: export GMXLIB=/usr/local/share/gromacs/top:$CDIR"
           echo "        或装到系统库: sudo cp -r $CDIR/charmm36.ff /usr/local/share/gromacs/top/"
@@ -307,10 +318,12 @@ if [ "$WITH_CHARMM36" -eq 1 ]; then
       warn "CHARMM36 下载失败: $CH36_URL"
     fi
   fi
-  warn "注意: MacKerell 的 charmm36.ff 与 GROMACS 2025 的 pdb2gmx 不兼容"
-  warn "      (实测报 'atom C1 not found in buiding block 1MET while combining tdb and rtp')。"
-  warn "      GROMACS 2025 上做 CHARMM 请用自带的 charmm27.ff + -water tips3p,"
-  warn "      或用 CHARMM-GUI 建模, 或把 GROMACS 降到 2023 及更早。"
+  warn "注意: 原始 charmm36.ff 需要打段名补丁才能用 (install_all.sh 已自动打好)。"
+  warn "      若你手工下载, 一定要执行:"
+  warn "        sed -i 's/\\[ MET1 \\]/[ ETHERS_MET1 ]/; s/\\[ HYD1 \\]/[ ETHERS_HYD1 ]/' \\"
+  warn "              <charmm36.ff>/ethers.n.tdb"
+  warn "      否则 pdb2gmx 会报 'atom C1 not found in buiding block 1MET'。"
+  warn "      打补丁后 charmm36 在 GROMACS 2025 上可正常使用 (实测 grompp 零警告)。"
   cd - >/dev/null || true
 fi
 

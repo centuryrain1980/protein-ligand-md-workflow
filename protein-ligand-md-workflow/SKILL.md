@@ -123,6 +123,11 @@ gmx mdrun -s md.tpr  -deffnm md  -ntmpi 1 -ntomp 6 -pin on -x md.xtc
   `/usr/local/share/gromacs/top/*.ff` 的目录名，本机清单见 `references/force-fields.md` 第 1 节。
 - **CHARMM36 必须用 `assets/mdp/charmm36_*.mdp`**：官方要求 `vdw-modifier = force-switch`、
   `rvdw-switch = 1.0`、`DispCorr = no` 等 10 项，通用模板不满足。
+- **MacKerell 的 `charmm36.ff` 要先打段名补丁**：`ethers.n.tdb` 里的 `[ MET1 ]` / `[ HYD1 ]`
+  会被 GROMACS 误当成"给蛋白 MET/HYD 用的末端补丁"，导致
+  `atom C1 not found in buiding block 1MET while combining tdb and rtp`。
+  改名成 `[ ETHERS_MET1 ]` / `[ ETHERS_HYD1 ]` 即可（`install_all.sh --with-charmm36` 会自动打）。
+  注意**必须改成不以 MET/HYD 开头**的名字。详见 `references/force-fields.md` 第 4.2 节。
 - **GROMOS 不建议用于定量自由能计算**：官方手册警告它按 twin-range 截断参数化，
   在 GROMACS 的单截断下密度等物理性质可能偏离。
 - **`micromamba create` 会先清空目标环境再下载**：镜像一旦 404 就留下一个空壳环境

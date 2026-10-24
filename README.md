@@ -22,6 +22,11 @@ GROMACS 2025, DuIvyTools, acpype, gmx_MMPBSA 1.7 and gnina 1.3.3.
 - [目录结构](#目录结构)
 - [环境要求](#环境要求)
 - [安装](#安装)
+  - [第 1 步：安装 skill](#第-1-步安装-skill)
+  - [第 2 步：安装运行环境（一条命令）](#第-2-步安装运行环境一条命令)
+  - [手动安装（如果你想自己控制）](#手动安装如果你想自己控制)
+  - [其它发行版](#其它发行版)
+  - [第 3 步：自检](#第-3-步自检)
 - [快速开始](#快速开始)
 - [分模块使用说明](#分模块使用说明)
 - [力场选型速查](#力场选型速查)
@@ -210,20 +215,24 @@ Rocky / CentOS / Fedora 请把脚本第 1 步换成 `dnf install -y epel-release
 
 ### 第 3 步：自检
 
+> `install_all.sh` 的第 7 步已经自动跑过一遍自检。单独再跑一次：
+
 ```bash
 bash ~/.codex/skills/protein-ligand-md-workflow/scripts/setup_env.sh
 ```
 
 会逐项打印 `[OK] / [WARN] / [FAIL]`，缺什么给出对应的安装命令。
 
-### 第 4 步（可选）：MM/PBSA 环境
+> **MM/PBSA 环境**（micromamba + AmberTools 26.0 + gmx_MMPBSA）
+> 也已经由 `install_all.sh` 第 4 步装好。
+> 如果你想单独补装（比如之前用了 `--without-mmpbsa`）：
 
 ```bash
 bash ~/.codex/skills/protein-ligand-md-workflow/scripts/setup_mmpbsa.sh
 ```
 
-用 micromamba 建一个独立的 `mmpbsa` 环境（Python 3.12 + AmberTools 26.0 + gmx_MMPBSA 1.7.0），
-**不要**装进系统 Python（gmx_MMPBSA 要求 `<3.13`）。
+它会建一个独立的 `mmpbsa` 环境（Python 3.12），
+**不要**装进系统 Python（gmx_MMPBSA 要求 `>=3.11, <3.13`）。
 
 ---
 

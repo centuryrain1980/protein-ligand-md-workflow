@@ -310,8 +310,18 @@ if [ "$WITH_CHARMM36" -eq 1 ]; then
             log "已修复 ethers.n.tdb 的段名冲突 (MET1/HYD1 -> ETHERS_MET1/ETHERS_HYD1)"
           fi
           log "CHARMM36 力场文件已装到 $CDIR/charmm36.ff"
-          echo "        免 sudo 使用: export GMXLIB=/usr/local/share/gromacs/top:$CDIR"
-          echo "        或装到系统库: sudo cp -r $CDIR/charmm36.ff /usr/local/share/gromacs/top/"
+          # 写入 GMXLIB, 否则 gmx pdb2gmx -ff charmm36 会报
+          # "Could not find force field 'charmm36' in current directory, install tree or GMXLIB path"
+          # .bashrc 供交互式终端用; .profile 供登录 shell 用(覆盖非交互 bash -lc)
+          GXL="export GMXLIB=/usr/local/share/gromacs/top:$CDIR"
+          for RC in "$HOME/.bashrc" "$HOME/.profile"; do
+            touch "$RC"
+            grep -qF "$GXL" "$RC" || printf '\n# protein-ligand-md-workflow: CHARMM36 力场目录\n%s\n' "$GXL" >> "$RC"
+          done
+          log "已把 GMXLIB 写入 ~/.bashrc 与 ~/.profile"
+          echo "        【推荐】装到系统库, 这样连非交互脚本也能用:"
+          echo "          sudo cp -r $CDIR/charmm36.ff /usr/local/share/gromacs/top/"
+          echo "        不想用 sudo 就重开终端(source ~/.bashrc)"
         fi
       fi
     else

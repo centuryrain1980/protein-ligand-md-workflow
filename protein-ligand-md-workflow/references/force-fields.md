@@ -295,10 +295,27 @@ mv charmm36-jul2022.ff charmm36.ff
 # 2) 【必须】打段名补丁, 否则 pdb2gmx 会报 "atom C1 not found in buiding block 1MET"
 sed -i 's/\[ MET1 \]/[ ETHERS_MET1 ]/; s/\[ HYD1 \]/[ ETHERS_HYD1 ]/' charmm36.ff/ethers.n.tdb
 
-# 3) 装到 GROMACS 力场库(需要 sudo), 或免 sudo 用 GMXLIB
+# 3) 装到 GROMACS 力场库(推荐, 需要 sudo)
 sudo cp -r charmm36.ff /usr/local/share/gromacs/top/
-# export GMXLIB=/usr/local/share/gromacs/top:$HOME/apps/charmm36
+
+# 4) 免 sudo 的替代: 用 GMXLIB 指过去, 并写进启动文件
+export GMXLIB=/usr/local/share/gromacs/top:$HOME/apps/charmm36
+grep -q GMXLIB ~/.bashrc  || echo 'export GMXLIB=/usr/local/share/gromacs/top:$HOME/apps/charmm36' >> ~/.bashrc
+grep -q GMXLIB ~/.profile || echo 'export GMXLIB=/usr/local/share/gromacs/top:$HOME/apps/charmm36' >> ~/.profile
 ```
+
+> ⚠️ **不设 `GMXLIB` 就会报**：
+> `Could not find force field 'charmm36' in current directory, install tree or GMXLIB path`
+>
+> GROMACS 找力场的顺序是：**当前工作目录 → `GMXLIB` → 安装树**。
+> 所以只放在 `~/apps/` 下是不行的，必须告诉 GROMACS 去哪找。
+>
+> 另外注意 Ubuntu 的 `~/.bashrc` 开头有交互守卫
+> （`case $- in *i*) ;; *) return;; esac`），**非交互 shell 会直接 return**，
+> 所以 `~/.bashrc` 里的 export 在 `bash -c` / 脚本 / cron 里不生效。
+> 要覆盖这些场景，请**装到系统力场库**（最省心），
+> 或至少同时写进 `~/.profile`（登录 shell 会读）。
+> `scripts/install_all.sh --with-charmm36` 会自动写这两个文件。
 
 > `scripts/install_all.sh --with-charmm36` **会自动完成第 1、2 步**（含补丁）。
 > `charmm36.ff` 自带 `tip3p.itp`（CHARMM modified TIP3P），不需要从别处补。
@@ -712,6 +729,8 @@ MM/PBSA 侧：CHARMM 体系要用 `PBRadii = 7`（charmm_radii，见 6.2 之外�
 | `Could not find water model 'opc'` | 未内置 OPC | 用 `tip3p`，或自行安装 OPC 文件 |
 | `water model 'tips3p' not found` | 你在用 `amber99sb.ff` 而不是 `charmm27.ff`/`charmm36.ff` | `tips3p` 只在 CHARMM 目录里有 |
 | CHARMM36 结果异常（密度/能量不合理） | mdp 没按官方改满 10 项 | 换用 `assets/mdp/charmm36_*.mdp` |
+| `Could not find force field 'charmm36'` | 力场放在 `~/apps/` 但没告诉 GROMACS 去哪找 | 设 `GMXLIB`（写进 `~/.bashrc` + `~/.profile`），或 `sudo cp` 到 `/usr/local/share/gromacs/top/` |
+| `atom C1 not found in buiding block 1MET` | charmm36.ff 的 `ethers.n.tdb` 段名与 GROMACS 约定冲突 | `sed -i 's/\[ MET1 \]/[ ETHERS_MET1 ]/; s/\[ HYD1 \]/[ ETHERS_HYD1 ]/'` |
 | grompp 报 `vdw-modifier` 相关警告 | 模板是通用模板（无 force-switch） | 同上 |
 | `could not convert string to float: '*********'` | 某残基能量溢出（常见于 OPLS 拓扑转换） | 换 AMBER 系蛋白力场；见 `references/mmpbsa.md` |
 | `IDECOMP cannot be 0` | 给了两个组即启用分解 | `idecomp = 1..4` |

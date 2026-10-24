@@ -403,8 +403,14 @@ tar xzf toppar/non_charmm/gromacs/charmm36-jul2022.ff.tgz
 mv charmm36-jul2022.ff charmm36.ff
 # 【必须】打段名补丁
 sed -i 's/\[ MET1 \]/[ ETHERS_MET1 ]/; s/\[ HYD1 \]/[ ETHERS_HYD1 ]/' charmm36.ff/ethers.n.tdb
-sudo cp -r charmm36.ff /usr/local/share/gromacs/top/     # 或免 sudo: export GMXLIB=...:$HOME/apps/charmm36
+sudo cp -r charmm36.ff /usr/local/share/gromacs/top/     # 推荐, 最省心
+# 免 sudo 的替代(必须设, 否则报 Could not find force field 'charmm36'):
+#   export GMXLIB=/usr/local/share/gromacs/top:$HOME/apps/charmm36
+#   写进 ~/.bashrc(交互式)和 ~/.profile(登录 shell), 因为 .bashrc 开头有交互守卫,
+#   非交互脚本(bash -c / cron)里 .bashrc 会直接 return。
 ```
+
+> `scripts/install_all.sh --with-charmm36` **会自动完成下载 + 打补丁 + 写 GMXLIB**。
 
 > `scripts/install_all.sh --with-charmm36` **会自动完成下载 + 打补丁**。
 

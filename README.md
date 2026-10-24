@@ -354,6 +354,25 @@ python3 merge_gaff_ff.py \
 > 原因是 CHARMM36 的 `aminoacids.rtp` 没有 GROMACS 2024+ 所需的末端残基变体块。
 > （另注：`charmm36.ff` 的水模型名是 `tip3p`，而 `charmm27.ff` 的是 `tips3p`，别混。）
 
+#### charmm27.ff vs charmm36.ff：到底差在哪（本机逐项实测）
+
+| 维度 | charmm27.ff | charmm36.ff |
+|---|---|---|
+| 蛋白参数来源 | **CHARMM22 + CMAP**（"27" 指的是脂质版本，蛋白还是 22） | **CHARMM36**（`par_all36m_prot.prm`） |
+| **蛋白原子 LJ（σ/ε）** | 基准 | **完全相同** |
+| **蛋白原子电荷** | 基准 | **307 个里 293 个相同**，只有**色氨酸**改了 14 个原子 |
+| 正二面角 | 587 条 | 共有 458 条里 **46 条（10%）不同** |
+| **CMAP 骨架修正** | **6 项** | **24 项**（4 倍） |
+| **小分子** | 无 | **CGenFF 4.6** |
+| 核酸/脂质 | CHARMM22 时代 / CHARMM27 | 全部重做 |
+
+**结论**：蛋白部分差异其实很小（对结合自由能影响约 1–2 kcal/mol 量级），
+**真正的差别在配套** —— CHARMM36 自带 CGenFF，小分子和蛋白是一套自洽参数。
+⚠️ 但**别混用**（蛋白 charmm27 + 配体 CGenFF-36，或蛋白 36 + 配体 GAFF）。
+
+完整对比（含逐原子电荷表、具体改了哪些二面角）见
+`references/force-fields.md` 第 4.3 节。
+
 **方案 A（推荐，已验证）—— 用 GROMACS 自带的 `charmm27.ff`**
 
 CHARMM27 蛋白力场 + CHARMM modified TIP3P 水，GROMACS 官方移植并支持。

@@ -22,6 +22,7 @@
 - [2. 选型决策树](#2-选型决策树)
 - [3. 蛋白力场 × 水模型 配对表](#3-蛋白力场--水模型-配对表)
 - [4. 各力场必须配套的 mdp 参数](#4-各力场必须配套的-mdp-参数)
+  - [4.3 CHARMM27 与 CHARMM36 到底差在哪](#43-charmm27-与-charmm36-到底差在哪本机逐项实测)
 - [5. 参数转换细节（AMBER → GROMACS）](#5-参数转换细节amber--gromacs)
 - [6. gmx_MMPBSA 1.7.0 里与力场有关的参数](#6-gmx_mmpbsa-170-里与力场有关的参数)
 - [7. 推荐配方与完整命令](#7-推荐配方与完整命令)
@@ -246,7 +247,91 @@ sudo cp -r charmm36.ff /usr/local/share/gromacs/top/
 > 于是 `rvdw` 只能抬到 1.2，`rcoulomb` 就必须跟着抬到 1.2。
 > 本 skill 的 `charmm36_em.mdp` / `charmm36_ions.mdp` 已经改好。
 
-### 4.3 GROMOS（官方警告，定量计算请避开）
+### 4.3 CHARMM27 与 CHARMM36 到底差在哪（本机逐项实测）
+
+> 数据来源：本机 `/usr/local/share/gromacs/top/charmm27.ff` 与
+> `~/apps/charmm36/charmm36.ff`（MacKerell `charmm36-jul2022.ff`）逐文件解析对比。
+> 下方每个数字都能复现。
+
+#### 先纠正一个常见误解
+
+`charmm27.ff/forcefield.doc` 自己写着：
+
+> **CHARMM27 all-atom force field (CHARM22 plus CMAP for proteins)**
+> Parameters derived from **c32b1** version of CHARMM
+
+也就是说 **"27" 指的是脂质力场的版本号，蛋白部分其实还是 CHARMM22（1998）+ CMAP（2004）**。
+`charmm27.ff` ≠ "第 27 版的蛋白力场"，而是"蛋白用 CHARMM22、脂质用 CHARMM27"的打包。
+`charmm36.ff/forcefield.doc` 则写明 *Parameters taken from CHARMM36 and CGenFF 4.6*。
+
+#### 逐项对比
+
+| 维度 | charmm27.ff | charmm36.ff |
+|---|---|---|
+| 蛋白参数来源 | CHARMM22 + CMAP（c32b1） | **CHARMM36**（`par_all36m_prot.prm`, jul22） |
+| 原子类型总数 | 134 | **579**（450 个为其独有） |
+| 蛋白 rtp 残基块数 | 45 | **541**（含各种末端/质子化变体） |
+| **CMAP 骨架修正项** | **6** | **24**（4 倍） |
+| 蛋白原子 **LJ（σ/ε）** | 基准 | **完全相同**（N/CA/C/O/S/H/HA… 逐个核对全一致） |
+| 蛋白原子 **电荷** | 基准 | **307 个原子里 293 个完全相同**，只有**色氨酸**改了 14 个 |
+| 正二面角 / 非正二面角 | 587 / 47 | 16054 / 368；**共有 458 条里 46 条（10%）参数不同** |
+| **小分子** | **无** | **CGenFF 4.6**（通用小分子力场） |
+| 核酸 | DNA/RNA（CHARMM22 时代参数） | 重做（`na.rtp`） |
+| 脂质 | `lipids.rtp`（CHARMM27） | `lipid.rtp`（CHARMM36） |
+| 额外模块 | — | 碳水、醚、金属、硅酸盐、溶剂 |
+| NBFIX 存放方式 | `ffnabonded.itp` 38.6 KB + `ffnanonbonded.itp` 32.8 KB | `nbfix.itp` 16.5 KB（~111 条 `nonbond_params`） |
+| 水模型名 | `tips3p` | `tip3p`（两者都是 CHARMM modified TIP3P，H 上带 LJ） |
+| **GROMACS 2025 `pdb2gmx`** | ✅ 可用（实测 0 警告） | ❌ 见 4.2 节的兼容性说明 |
+
+#### 具体改了哪些
+
+**电荷**——唯一有实质改动的是**色氨酸吲哚环的电荷重分配**（19 个标准残基里只改了它）：
+
+```
+TRP:  CD1  0.035→-0.150    CE2  0.130→ 0.240    CZ2 -0.115→-0.270
+      CD2 -0.020→ 0.110    CE3 -0.115→-0.250    CZ3 -0.115→-0.200
+      CH2 -0.115→-0.140    NE1 -0.610→-0.510
+      HD1  0.115→ 0.220    HE1  0.380→ 0.370    HE3  0.115→ 0.170
+      HH2  0.115→ 0.140    HZ2  0.115→ 0.160    HZ3  0.115→ 0.140
+```
+
+ALA / ARG / LYS / ASP / GLU / TYR / PHE / SER / THR / LEU / ILE / VAL / MET / CYS / ASN / GLN / GLY / PRO
+——**电荷逐原子完全相同**。
+
+**二面角**——共有 458 条正二面角里 46 条（10%）参数不同，例如：
+
+```
+CC-CT2-NH1-C :  k = 0.16736  →  8.368      (5 倍)
+```
+
+**CMAP**——6 项 → 24 项，意味着骨架 φ/ψ 的二维势能修正覆盖面大得多，
+对长程二级结构比例（螺旋/无规卷曲）的影响比对结合自由能更明显。
+
+#### 对蛋白-配体体系意味着什么
+
+**蛋白部分的差异其实很小**：LJ 参数完全一样，电荷只有色氨酸变了，二面角 10% 不同。
+**对结合自由能数值的影响大致在 1–2 kcal/mol 量级**，一般不会推翻结论。
+
+**真正的差别在"配套"**：
+
+- CHARMM36 自带 **CGenFF** —— 小分子有官方通用参数，与蛋白是**自洽的一套**；
+- `charmm27.ff` **没有**通用小分子力场，配体只能外挂 GAFF 或 CGenFF，
+  蛋白-配体的参数一致性就弱了；
+- CMAP 24 vs 6 —— 做二级结构、螺旋稳定性分析时差别会被放大。
+
+> ⚠️ **别混用**：蛋白用 `charmm27.ff` 而配体参数来自 CHARMM36 的 CGenFF，
+> 或蛋白用 CHARMM36 而配体用 GAFF —— 参数不是一套自洽的东西，
+> 强行组合出来的结果没有意义。
+
+#### 选型建议
+
+| 你的诉求 | 建议 |
+|---|---|
+| 要在 GROMACS 2025 上直接跑通 | `charmm27.ff` + `-water tips3p`（本 skill 已实测 0 警告） |
+| 要严格的 CHARMM36 + CGenFF 配套 | 用 **CHARMM-GUI** 建模产出 GROMACS 拓扑（社区标准做法），绕过 `pdb2gmx` |
+| 做 MM/PBSA 结合自由能 | 优先 **AMBER99SB + GAFF**（本 skill 默认）；CHARMM 体系要用 `PBRadii = 7`（charmm_radii） |
+| 复现某篇论文 | 严格照抄论文用的力场，不要"挑更新的" |
+### 4.4 GROMOS（官方警告，定量计算请避开）
 
 GROMACS 官方手册原文：
 

@@ -35,6 +35,7 @@ GROMACS 2025, DuIvyTools, acpype, gmx_MMPBSA 1.7 and gnina 1.3.3.
 
 | 阶段 | 能力 | 说明 |
 |---|---|---|
+| **0. 环境一键安装** | **`install_all.sh`** | **新机器上一条命令装齐全部依赖**：系统包 → GROMACS 2025 编译 → Python 工具链 → MM/PBSA 环境 → 对接工具 → PATH 持久化 → 自检。幂等，已装好的自动跳过 |
 | **0. 环境自检** | `setup_env.sh` | 一键检查 GROMACS / dit / acpype / obabel / vina / gnina / 分析库是否就位，并给出安装建议 |
 | **0.5 力场选型** | `references/force-fields.md` | 本机可用力场清单、选型决策树、水模型配对表、CHARMM36 官方强制 mdp、AMBER→GROMACS 转换细节 |
 | **1. 分子对接** | `dock_ligand.sh` | gnina（Vina 打分 + CNN 深度学习重打分）把配体送进口袋；自动定盒子、转 PDBQT |
@@ -78,7 +79,8 @@ protein-ligand-md-workflow/
     │   ├── mmpbsa.md          ← MM/PBSA 环境、参数、输出格式、踩坑
     │   └── gromacs-2025-api.md← GROMACS 2025 命令参数变更与排错
     └── scripts/               ← 可直接执行的一键脚本
-        ├── setup_env.sh       环境自检
+        ├── install_all.sh     一键安装全部环境(新机器首选)
+    ├── setup_env.sh       环境自检
         ├── setup_ligand.sh    配体一条命令（SMILES → 复合物）
         ├── setup_mmpbsa.sh    安装 gmx_MMPBSA 环境
         ├── merge_gaff_ff.py   GAFF 力场合并
@@ -132,9 +134,48 @@ cp -r protein-ligand-md-workflow/protein-ligand-md-workflow ~/.codex/skills/
 
 装好后 **重启 Codex 或新开一轮对话**，skill 才会被加载。
 
-### 第 2 步：安装依赖
+### 第 2 步：安装运行环境（**一条命令**）
 
-在 WSL2 Ubuntu（或 Linux）里：
+在 WSL2 Ubuntu（或 Debian/Ubuntu 系 Linux）里：
+
+```bash
+bash ~/.codex/skills/protein-ligand-md-workflow/scripts/install_all.sh
+```
+
+这一条命令会依次完成：
+
+| 步骤 | 做什么 | 备注 |
+|---|---|---|
+| 0 前置检查 | 检测包管理器、网络 | 只支持 apt 系；其它发行版见下方说明 |
+| 1 系统依赖 | `build-essential cmake libfftw3-dev libomp-dev python3-pip …` | 需要 sudo |
+| 2 **GROMACS 2025** | 下载源码 → cmake → make → 装到 `/usr/local` | **最耗时（20–60 分钟）**；自动按 CPU 选 `AVX2_256`/`AVX2`/`SSE4.2` |
+| 3 Python 工具链 | `DuIvyTools acpype MDAnalysis mdtraj meeko rdkit gemmi ProDy numpy scipy pandas matplotlib` | 清华镜像加速 |
+| 4 MM/PBSA 环境 | micromamba + AmberTools 26.0 + gmx_MMPBSA 1.7 | 独立 Python 3.12 环境 |
+| 5 对接工具 | Vina 1.2.7 + gnina 1.3.2（CPU 版） | 约 1.5 GB 下载 |
+| 6 PATH 持久化 | 写入 `~/.bashrc` | 重开终端生效 |
+| 7 环境自检 | 调 `setup_env.sh` 逐项验收 | 缺什么会明确报出来 |
+
+**常用参数**
+
+```bash
+bash install_all.sh --without-gromacs   # 系统已有 gmx 就跳过编译(最快)
+bash install_all.sh --without-docking   # 不装 Vina/gnina
+bash install_all.sh --without-mmpbsa    # 不装 MM/PBSA 环境
+bash install_all.sh --mirror https://pypi.org/simple   # 换 pip 源
+bash install_all.sh --help
+```
+
+脚本是**幂等**的：已装好的组件自动跳过，可以反复执行只补缺的那部分。
+
+> **需要 sudo**：装系统包和把 GROMACS 装到 `/usr/local` 都要 root 权限。
+> 脚本会先认证一次 sudo 并缓存凭证；如果没有交互式终端（例如在 CI 里跑），
+> 它会**直接跳过特权步骤并明确告警**，不会卡在"请输入密码"上。
+
+> **装到用户目录（不需要 sudo）**：把 GROMACS 装到 `~/.local`，
+> 然后 `export PATH="$HOME/.local/bin:$PATH"`，
+> 同时把 `GMXDATA` 指向 `~/.local/share/gromacs/top`。
+
+### 手动安装（如果你想自己控制）
 
 ```bash
 # GROMACS 2025（含 AVX2 优化）
@@ -144,16 +185,28 @@ cp -r protein-ligand-md-workflow/protein-ligand-md-workflow ~/.codex/skills/
 # DuIvyTools
 pip3 install --break-system-packages -i https://pypi.tuna.tsinghua.edu.cn/simple DuIvyTools
 
-# 配体参数化与分析库（建议虚拟环境，Ubuntu 26.04 的 rich 包由 Debian 托管）
-python3 -m venv ~/venvs/mdtools
-source ~/venvs/mdtools/bin/activate
-pip install acpype mdanalysis mdtraj meeko rdkit gemmi prody
+# 配体参数化与分析库
+# Ubuntu 26.04 的 rich 包由 Debian 托管, 需要 --break-system-packages
+pip3 install --break-system-packages --ignore-installed rich \
+      -i https://pypi.tuna.tsinghua.edu.cn/simple \
+      acpype mdanalysis mdtraj meeko rdkit gemmi prody
 
 # Open Babel / Vina / gnina
 apt install openbabel
 # vina: https://github.com/ccsb-scripps/AutoDock-Vina/releases
 # gnina: https://github.com/gnina/gnina/releases
 ```
+
+> acpype 2026 **自带 antechamber**（打包在 `acpype/amber_linux/` 里），
+> 所以做 GAFF 配体参数化**不需要**单独安装 AmberTools；
+> 只有 MM/PBSA（cpptraj/sander/tleap）才需要 AmberTools，
+> 它由 `install_all.sh` 第 4 步在独立的 micromamba 环境里提供。
+
+### 其它发行版
+
+`install_all.sh` 目前只支持 `apt` 系（Ubuntu / Debian / WSL）。
+Rocky / CentOS / Fedora 请把脚本第 1 步换成 `dnf install -y epel-release && dnf install -y gcc gcc-c++ cmake make wget curl bzip2 python3-pip python3-virtualenv fftw-devel libomp-devel openbabel`，
+其余步骤（2–7）不变。
 
 ### 第 3 步：自检
 

@@ -8,6 +8,17 @@ warn() { printf "  ${YELLOW}[WARN]${NC} %s\n" "$1"; }
 bad()  { printf "  ${RED}[FAIL]${NC} %s\n" "$1"; }
 
 echo "=============================================="
+echo " 0. 一键安装 (缺什么装什么, 可重复执行)"
+echo "=============================================="
+INSTALL_SH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/install_all.sh"
+if [ -f "$INSTALL_SH" ]; then
+  echo "  一键装齐全部环境: bash $INSTALL_SH"
+  echo "  (幂等, 已装好的会跳过; 编译 GROMACS 最耗时, 可加 --without-gromacs)"
+else
+  echo "  未找到 install_all.sh"
+fi
+echo
+echo "=============================================="
 echo " 1. GROMACS"
 echo "=============================================="
 if command -v gmx >/dev/null; then
@@ -60,11 +71,9 @@ if command -v acpype >/dev/null; then
 elif [ -x "$HOME/.local/bin/acpype" ]; then
   warn "acpype 在 ~/.local/bin, 不在 PATH; 加: export PATH=\$HOME/.local/bin:\$PATH"
 else
-  warn "acpype 未安装。Ubuntu 26.04 的 rich 包由 Debian 管理, 直接 pip install 会失败"
-  echo "        推荐用虚拟环境:"
-  echo "          python3 -m venv ~/venvs/mdtools"
-  echo "          source ~/venvs/mdtools/bin/activate"
-  echo "          pip install acpype mdanalysis mdtraj"
+  warn "acpype 未安装。一键安装: bash $INSTALL_SH"
+  echo "        (Ubuntu 26.04 的 rich 包由 Debian 管理, pip 需要 --break-system-packages;"
+  echo "         acpype 2026 自带 antechamber, 不需要另外装 AmberTools 才能做配体参数化)"
 fi
 
 echo

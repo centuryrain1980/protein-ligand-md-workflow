@@ -7,16 +7,23 @@ export MAMBA_ROOT_PREFIX="$H"
 MM="$H/bin/micromamba"
 
 echo "=== 1. micromamba ==="
+MM_URL="${MM_URL:-https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/linux-64/micromamba-2.8.1-1.tar.bz2}"
 if [ ! -x "$MM" ]; then
   mkdir -p "$H"
-  echo "  请把 micromamba.tar.bz2 放到工作区, 或从 conda-forge 下载:"
-  echo "    https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/linux-64/micromamba-2.8.1-1.tar.bz2"
+  echo "  准备 micromamba ..."
   TAR=$(ls -1 "$HOME"/../*/work/ref/micromamba.tar.bz2 2>/dev/null | head -1)
   [ -z "$TAR" ] && TAR=$(find /mnt -maxdepth 6 -name "micromamba.tar.bz2" 2>/dev/null | head -1)
-  [ -z "$TAR" ] && { echo "  错误: 找不到 micromamba.tar.bz2"; exit 1; }
-  echo "  从 $TAR 解压"
-  tar xjf "$TAR" -C "$H" bin/micromamba
-  chmod +x "$MM"
+  if [ -n "$TAR" ]; then
+    echo "  用本地包: $TAR"
+  else
+    echo "  本地没有, 从镜像下载: $MM_URL"
+    TAR="$H/micromamba.tar.bz2"
+    curl -fL --retry 3 --connect-timeout 30 -o "$TAR" "$MM_URL" \
+      || { echo "  错误: 下载 micromamba 失败, 可手动下载后放到任意目录再重跑"; exit 1; }
+  fi
+  echo "  解压 ..."
+  tar xjf "$TAR" -C "$H" bin/micromamba || { echo "  错误: 解压失败"; exit 1; }
+  chmod +x "$MM" || { echo "  错误: 无法给 micromamba 加执行权限"; exit 1; }
 fi
 "$MM" --version | head -1 | sed 's/^/  /'
 
@@ -37,19 +44,52 @@ EOF
 echo
 echo "=== 3. 创建环境 (python 3.12 + ambertools) ==="
 # gmx_MMPBSA 要求 python>=3.11,<3.13, 且需要 cpptraj/tleap/sander(parmed)
-if "$MM" env list 2>/dev/null | grep -qE "^mmpbsa[[:space:]]"; then
-  echo "  环境 mmpbsa 已存在, 跳过创建"
+# 判断环境是否可用: 以"关键可执行文件都在"为准。
+# 注意: 不能只看 `micromamba env list` 的名字 —— 它的输出行首有两个空格,
+#       `grep -qE "^mmpbsa"` 匹配不到, 会误判成"环境不存在"从而触发重建。
+#       而 micromamba create 会先清空目标环境再下载, 镜像一旦 404 就会留下空壳环境。
+ENV_DIR="$H/envs/mmpbsa"
+env_ok() {
+  [ -x "$ENV_DIR/bin/python" ] && [ -x "$ENV_DIR/bin/gmx_MMPBSA" ] && [ -x "$ENV_DIR/bin/cpptraj" ]
+}
+if env_ok; then
+  echo "  环境 mmpbsa 已存在且完整, 跳过创建"
 else
-  timeout 2400 "$MM" create -y -n mmpbsa -c conda-forge \
-      python=3.12 ambertools=26.0 parmed mpi4py numpy=1.26 pandas matplotlib seaborn scipy tqdm \
-      > "$H/create.log" 2>&1
-  echo "  create exit=$?  (日志 $H/create.log)"
+  if [ -d "$ENV_DIR" ]; then
+    echo "  环境 mmpbsa 存在但不完整(可能上次创建失败), 先移除"
+    "$MM" env remove -n mmpbsa -y >/dev/null 2>&1 || rm -rf "$ENV_DIR"
+  fi
+  create_env() {
+    timeout 2400 "$MM" create -y -n mmpbsa -c conda-forge \
+        python=3.12 ambertools=26.0 parmed mpi4py numpy=1.26 pandas matplotlib seaborn scipy tqdm \
+        > "$H/create.log" 2>&1
+  }
+  echo "  创建环境 (python 3.12 + ambertools 26.0) ..."
+  if create_env; then
+    echo "  create OK"
+  else
+    echo "  用当前镜像源创建失败, 清理缓存后改用官方 conda-forge 重试 ..."
+    tail -5 "$H/create.log" | sed 's/^/    /'
+    "$MM" clean --all -y >/dev/null 2>&1 || true
+    sed -i 's#https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge#https://conda.anaconda.org/conda-forge#' "$H/.condarc" 2>/dev/null || true
+    if create_env; then
+      echo "  create OK (官方源)"
+    else
+      tail -20 "$H/create.log" | sed 's/^/    /'
+      echo "  错误: 环境创建失败。日志 $H/create.log"
+      exit 1
+    fi
+  fi
 fi
 
 echo
 echo "=== 4. 安装 gmx_MMPBSA ==="
+if ! env_ok; then
+  echo "  错误: mmpbsa 环境不可用, 跳过 gmx_MMPBSA 安装"
+  exit 1
+fi
 "$MM" run -n mmpbsa pip install --no-cache-dir \
-    -i https://pypi.tuna.tsinghua.edu.cn/simple gmx_MMPBSA 2>&1 | tail -2
+    -i "${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}" gmx_MMPBSA 2>&1 | tail -2
 
 echo
 echo "=== 5. 验证 ==="

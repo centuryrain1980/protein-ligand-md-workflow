@@ -346,19 +346,40 @@ python3 merge_gaff_ff.py \
 > `Atomtype c3 not found` 或 `Syntax error`。而且 GROMACS 2025 把原子类型拆在
 > `ffnonbonded.itp` 和 `atomtypes.atp` **两个文件**里，脚本两个都会写。
 
-### 4. CHARMM36 体系
+### 4. CHARMM 体系（重要：CHARMM36 在 GROMACS 2025 上有兼容性问题）
 
-先从 MacKerell 实验室下载 GROMACS 格式的 CHARMM36，装到
-`/usr/local/share/gromacs/top/charmm36.ff/`，然后：
+> **实测结论**：MacKerell 官方提供的 `charmm36.ff`（jul2022，含 `charmm36_ljpme` 变体）
+> **无法用 GROMACS 2025 的 `pdb2gmx` 建拓扑**，报
+> `Fatal error: atom C1 not found in buiding block 1MET while combining tdb and rtp`。
+> 原因是 CHARMM36 的 `aminoacids.rtp` 没有 GROMACS 2024+ 所需的末端残基变体块。
+> （另注：`charmm36.ff` 的水模型名是 `tip3p`，而 `charmm27.ff` 的是 `tips3p`，别混。）
+
+**方案 A（推荐，已验证）—— 用 GROMACS 自带的 `charmm27.ff`**
+
+CHARMM27 蛋白力场 + CHARMM modified TIP3P 水，GROMACS 官方移植并支持。
+本 skill 的 `assets/mdp/charmm36_*.mdp` 就是按它验证的（`grompp` 零警告零错误）：
 
 ```bash
 gmx pdb2gmx -f receptor.pdb -o protein.gro -i posre.itp -p topol.top \
-            -ff charmm36 -water tips3p -ignh < /dev/null
+            -ff charmm27 -water tips3p -ignh < /dev/null
 ```
 
-mdp **必须**换成 `assets/mdp/charmm36_*.mdp`（已按官方 10 项参数配好，
-`grompp` 实测 0 warning）。若下载包里没有 `tips3p.itp`，
-可从 `/usr/local/share/gromacs/top/charmm27.ff/tips3p.itp` 复制。
+mdp **必须**换成 `assets/mdp/charmm36_*.mdp`（官方 10 项强制参数已配好）。
+
+**方案 B —— 用 CHARMM-GUI 建模**，直接产出 GROMACS 拓扑，跳过 `pdb2gmx`。
+
+**方案 C —— 降级 GROMACS 到 2023 及更早**，只有在确实需要 CHARMM36 参数时才值得。
+
+如果只是想拿到 CHARMM36 的力场文件本身：
+
+```bash
+mkdir -p ~/apps/charmm36 && cd ~/apps/charmm36
+curl -fLO "https://mackerell.umaryland.edu/download.php?filename=CHARMM_ff_params_files/toppar_c36_feb26.tgz"
+tar xzf toppar_c36_feb26.tgz
+tar xzf toppar/non_charmm/gromacs/charmm36-jul2022.ff.tgz
+mv charmm36-jul2022.ff charmm36.ff
+sudo cp -r charmm36.ff /usr/local/share/gromacs/top/     # 或免 sudo: export GMXLIB=...:$HOME/apps/charmm36
+```
 
 ### 5. MM/PBSA（`scripts/run_mmpbsa.sh`）
 
@@ -419,8 +440,12 @@ bash analyze.sh <工作目录>
 - 做 MM/PBSA 时**蛋白力场固定用 AMBER 系**。实测 OPLS 蛋白拓扑经 ParmEd 转 AMBER
   时键合参数出错（`BOND = 609605 kcal/mol`），某些残基能量溢出，sander 打印
   `*********`，gmx_MMPBSA 解析时直接 `ValueError` 崩掉。AMBER 系是原生转换，无此问题。
-- **力场与水模型必须成套选**：蛋白用 AMBER 配 `tip3p`，CHARMM 配 `tips3p`。
-- **CHARMM36 必须换一整套 mdp**（官方 10 项），不能只改 `-ff`。
+- **力场与水模型必须成套选**：蛋白用 AMBER 配 `tip3p`，CHARMM27 配 `tips3p`。
+- **CHARMM 必须换一整套 mdp**（官方 10 项），不能只改 `-ff`。
+- ⚠️ **CHARMM36（MacKerell 官方 `charmm36.ff`）与 GROMACS 2025 的 `pdb2gmx` 不兼容**，
+  实测报 `atom C1 not found in buiding block 1MET while combining tdb and rtp`。
+  GROMACS 2025 上做 CHARMM 请用自带的 `charmm27.ff`（已验证），
+  或用 CHARMM-GUI 建模，或降级 GROMACS。详见下文「分模块使用说明 → 4. CHARMM 体系」。
 - **GROMOS 不建议用于定量自由能计算**（官方手册有明确警告）。
 
 ---

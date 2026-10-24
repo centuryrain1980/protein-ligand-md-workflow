@@ -9,6 +9,9 @@
 #   --with-docking      安装 Vina + gnina(默认开, 需下载约 1.5 GB)
 #   --without-docking   跳过对接工具
 #   --without-mmpbsa    跳过 MM/PBSA 环境(micromamba + AmberTools, 约 2 GB)
+#   --with-charmm36     额外下载 MacKerell 的 CHARMM36 力场文件(14 MB)
+#                        注意: 该 ff 与 GROMACS 2025 的 pdb2gmx 不兼容,
+#                        GROMACS 2025 上做 CHARMM 请用自带的 charmm27.ff
 #   --mirror <url>      pip 镜像(默认清华源)
 #   -h | --help         显示本帮助
 #
@@ -28,6 +31,7 @@ GNINA_URL="${GNINA_URL:-https://github.com/gnina/gnina/releases/download/v1.3.2/
 WITH_GROMACS=1
 WITH_DOCKING=1
 WITH_MMPBSA=1
+WITH_CHARMM36=0
 BUILD_JOBS="${BUILD_JOBS:-$(nproc 2>/dev/null || echo 4)}"
 
 # ---------- 输出helper ----------
@@ -48,6 +52,7 @@ while [ $# -gt 0 ]; do
     --with-docking)    WITH_DOCKING=1 ;;
     --without-docking) WITH_DOCKING=0 ;;
     --without-mmpbsa)  WITH_MMPBSA=0 ;;
+    --with-charmm36)   WITH_CHARMM36=1 ;;
     --mirror)          PIP_INDEX_URL="${2:?--mirror 需要一个 URL}"; shift ;;
     -h|--help)         usage ;;
     *) die "未知选项: $1 (用 --help 看用法)" ;;
@@ -61,6 +66,7 @@ echo "${B}=========================================================${N}"
 echo "  GROMACS 编译 : $([ $WITH_GROMACS -eq 1 ] && echo 开 || echo 关)"
 echo "  对接工具     : $([ $WITH_DOCKING -eq 1 ] && echo 开 || echo 关)"
 echo "  MM/PBSA 环境 : $([ $WITH_MMPBSA -eq 1 ] && echo 开 || echo 关)"
+echo "  CHARMM36 ff   : $([ $WITH_CHARMM36 -eq 1 ] && echo 开 || echo 关)"
 echo "  pip 镜像     : $PIP_INDEX_URL"
 echo "  并行编译数   : $BUILD_JOBS"
 
@@ -266,6 +272,46 @@ else
       warn "gnina 下载失败, 可手动下载: $GNINA_URL"
     fi
   fi
+fi
+
+# ---------- 5b. CHARMM36 力场文件(可选) ----------
+if [ "$WITH_CHARMM36" -eq 1 ]; then
+  step "5b. CHARMM36 力场文件 (MacKerell)"
+  CH36_URL="${CH36_URL:-https://mackerell.umaryland.edu/download.php?filename=CHARMM_ff_params_files/toppar_c36_feb26.tgz}"
+  CDIR="$HOME/apps/charmm36"
+  mkdir -p "$CDIR" && cd "$CDIR" || die "无法创建 $CDIR"
+  if [ -d "$CDIR/charmm36.ff" ]; then
+    log "CHARMM36 力场文件已存在"
+  else
+    echo "  下载 toppar (~14 MB) ..."
+    if curl -fL --retry 3 --connect-timeout 30 -o toppar_c36.tgz "$CH36_URL"; then
+      tar xzf toppar_c36.tgz 2>/dev/null || true
+      FFGZ=$(find . -path "*gromacs*" -name "charmm36-*.ff.tgz" ! -name "*ljpme*" | head -1)
+      if [ -z "$FFGZ" ]; then
+        warn "包里没找到 charmm36-*.ff.tgz, 请到 $CH36_URL 手工下载"
+      else
+        rm -rf _ff && mkdir _ff
+        tar xzf "$FFGZ" -C _ff
+        SRCDIR=$(find _ff -maxdepth 1 -type d -name "*.ff" | head -1)
+        if [ -z "$SRCDIR" ]; then
+          warn "解压后没找到 *.ff 目录"
+        else
+          rm -rf "$CDIR/charmm36.ff"
+          cp -r "$SRCDIR" "$CDIR/charmm36.ff"
+          log "CHARMM36 力场文件已装到 $CDIR/charmm36.ff"
+          echo "        免 sudo 使用: export GMXLIB=/usr/local/share/gromacs/top:$CDIR"
+          echo "        或装到系统库: sudo cp -r $CDIR/charmm36.ff /usr/local/share/gromacs/top/"
+        fi
+      fi
+    else
+      warn "CHARMM36 下载失败: $CH36_URL"
+    fi
+  fi
+  warn "注意: MacKerell 的 charmm36.ff 与 GROMACS 2025 的 pdb2gmx 不兼容"
+  warn "      (实测报 'atom C1 not found in buiding block 1MET while combining tdb and rtp')。"
+  warn "      GROMACS 2025 上做 CHARMM 请用自带的 charmm27.ff + -water tips3p,"
+  warn "      或用 CHARMM-GUI 建模, 或把 GROMACS 降到 2023 及更早。"
+  cd - >/dev/null || true
 fi
 
 # ---------- 6. PATH 持久化 ----------

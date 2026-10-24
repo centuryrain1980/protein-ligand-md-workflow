@@ -182,19 +182,48 @@ DispCorr = no
   官方补充："色散修正在脂质**单层**时需要，双层（bilayer）不需要。"
 - `rlist = 1.2` —— 邻居表半径。
 
-**CHARMM36 力场文件安装**（本机尚未安装，`assets/mdp/charmm36_*.mdp` 需配合它使用）：
+#### ⚠️ 重要：CHARMM36 与 GROMACS 2025 的兼容性问题（本机实测）
 
-```bash
-# 1) 从 MacKerell 实验室下载 GROMACS 格式的 CHARMM36
-#    https://mackerell.umaryland.edu/charmm_ff.shtml
-# 2) 解压后把 charmm36.ff 放到 GROMACS 力场库
-sudo cp -r charmm36.ff /usr/local/share/gromacs/top/
-# 3) 验证 GROMACS 能识别
-gmx pdb2gmx -f protein.pdb -ff charmm36 -water tips3p -ignh < /dev/null
+**MacKerell 官方提供的 `charmm36.ff`（jul2022）在 GROMACS 2025 上无法用 `pdb2gmx` 建拓扑**，
+本机实测报错：
+
+```
+Fatal error:
+atom C1 not found in buiding block 1MET while combining tdb and rtp
 ```
 
-> 若下载包里没有 `tips3p.itp`（CHARMM modified TIP3P 水），可以从本机
-> `/usr/local/share/gromacs/top/charmm27.ff/tips3p.itp` 复制过去。
+原因：CHARMM36 的 `aminoacids.rtp` 只有 `[ MET ]` / `[ DMET ]` 这类残基块，
+**没有 GROMACS 2025 需要的末端变体块**（GROMACS 2024+ 改了末端残基的
+tdb/rtp 合并方式）。`charmm36_ljpme-jul2022` 变体同样报这个错。
+`charmm36.ff` 里**水模型名是 `tip3p`**（CHARMM modified TIP3P），
+不是 `charmm27.ff` 里的 `tips3p`。
+
+**所以，GROMACS 2025 上做 CHARMM 体系请走这两条路之一：**
+
+| 方案 | 说明 |
+|---|---|
+| **A. 用 GROMACS 自带的 `charmm27.ff`（推荐，本机已验证）** | CHARMM27 蛋白力场 + CHARMM modified TIP3P（`-water tips3p`）。GROMACS 官方移植并支持，`assets/mdp/charmm36_*.mdp` 就是按它验证的（grompp 零警告） |
+| B. 用 CHARMM-GUI 建模 | CHARMM36 体系的标准做法，CHARMM-GUI 直接输出 GROMACS 拓扑，跳过 `pdb2gmx` |
+| C. 降级 GROMACS 到 2023 及更早 | 只有确实需要 CHARMM36 参数时才值得 |
+
+#### 如果确实要用 CHARMM36 的力场文件
+
+```bash
+# 1) 从 MacKerell 实验室下载(含 GROMACS 格式)
+#    https://mackerell.umaryland.edu/charmm_ff.shtml
+#    -> toppar_c36_*.tgz 里的 non_charmm/gromacs/charmm36-*.ff.tgz
+mkdir -p ~/apps/charmm36 && cd ~/apps/charmm36
+curl -fLO "https://mackerell.umaryland.edu/download.php?filename=CHARMM_ff_params_files/toppar_c36_feb26.tgz"
+tar xzf toppar_c36_feb26.tgz
+tar xzf toppar/non_charmm/gromacs/charmm36-jul2022.ff.tgz
+mv charmm36-jul2022.ff charmm36.ff
+# 2) 装到 GROMACS 力场库(需要 sudo)
+sudo cp -r charmm36.ff /usr/local/share/gromacs/top/
+# 3) 或装到用户目录, 用 GMXLIB 指过去(免 sudo)
+#    export GMXLIB=/usr/local/share/gromacs/top:$HOME/apps/charmm36
+```
+
+> `charmm36.ff` 自带 `tip3p.itp`（CHARMM modified TIP3P），不需要从别处补。
 
 #### 本 skill 提供的模板（已实测）
 

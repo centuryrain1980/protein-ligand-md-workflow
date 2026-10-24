@@ -128,6 +128,11 @@ gmx mdrun -s md.tpr  -deffnm md  -ntmpi 1 -ntomp 6 -pin on -x md.xtc
   `atom C1 not found in buiding block 1MET while combining tdb and rtp`。
   改名成 `[ ETHERS_MET1 ]` / `[ ETHERS_HYD1 ]` 即可（`install_all.sh --with-charmm36` 会自动打）。
   注意**必须改成不以 MET/HYD 开头**的名字。详见 `references/force-fields.md` 第 4.2 节。
+- **CHARMM36 力场目录只能有一处**：GROMACS 找力场的顺序是"当前目录 → `GMXLIB` → 安装树"。
+  放 `~/apps/` 下必须设 `GMXLIB`（否则报 `Could not find force field 'charmm36'`）；
+  但**系统力场库和 `GMXLIB` 不能同时有**同名力场，否则报
+  `Force field 'charmm36' occurs in 2 places, but not in the current directory.`。
+  推荐 `sudo cp` 到 `/usr/local/share/gromacs/top/`，任何场景都不用管环境变量。
 - **GROMOS 不建议用于定量自由能计算**：官方手册警告它按 twin-range 截断参数化，
   在 GROMACS 的单截断下密度等物理性质可能偏离。
 - **`micromamba create` 会先清空目标环境再下载**：镜像一旦 404 就留下一个空壳环境

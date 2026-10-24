@@ -304,18 +304,40 @@ grep -q GMXLIB ~/.bashrc  || echo 'export GMXLIB=/usr/local/share/gromacs/top:$H
 grep -q GMXLIB ~/.profile || echo 'export GMXLIB=/usr/local/share/gromacs/top:$HOME/apps/charmm36' >> ~/.profile
 ```
 
-> ⚠️ **不设 `GMXLIB` 就会报**：
-> `Could not find force field 'charmm36' in current directory, install tree or GMXLIB path`
+> ⚠️ **系统力场库和 `GMXLIB` 只能二选一，不能同时用**：
 >
-> GROMACS 找力场的顺序是：**当前工作目录 → `GMXLIB` → 安装树**。
-> 所以只放在 `~/apps/` 下是不行的，必须告诉 GROMACS 去哪找。
+> 两边都有 `charmm36.ff` 时，GROMACS 会直接抛错
+> （源码 `pdb2top.cpp` 的 `choose_ff_impl`）：
 >
-> 另外注意 Ubuntu 的 `~/.bashrc` 开头有交互守卫
-> （`case $- in *i*) ;; *) return;; esac`），**非交互 shell 会直接 return**，
-> 所以 `~/.bashrc` 里的 export 在 `bash -c` / 脚本 / cron 里不生效。
-> 要覆盖这些场景，请**装到系统力场库**（最省心），
-> 或至少同时写进 `~/.profile`（登录 shell 会读）。
-> `scripts/install_all.sh --with-charmm36` 会自动写这两个文件。
+> ```
+> Fatal error:
+> Force field 'charmm36' occurs in 2 places, but not in the current directory.
+> Run pdb2gmx without the -ff switch and select the force field interactively.
+> ```
+>
+> 本机实测：先把 charmm36.ff 装进系统库、同时 `~/.bashrc` 里又留着 GMXLIB，
+> 真实终端里 `gmx pdb2gmx -ff charmm36` 就会报这个错；
+> 去掉 `GMXLIB` 立刻恢复正常。
+>
+> **所以正确的做法是二选一：**
+>
+> | 方式 | 做法 | 适用 |
+> |---|---|---|
+> | **A（推荐）** | `sudo cp -r charmm36.ff /usr/local/share/gromacs/top/` | 有 sudo；任何场景都直接可用，不需要任何环境变量 |
+> | B（免 sudo） | 放在 `~/apps/charmm36/`，并 `export GMXLIB=/usr/local/share/gromacs/top:$HOME/apps/charmm36` | 没有 sudo；**此时系统库里就不能再有同名力场** |
+>
+> 其它两点：
+>
+> - GROMACS 找力场的顺序是 **当前工作目录 → `GMXLIB` → 安装树**。
+>   只把文件放在 `~/apps/` 下、不告诉 GROMACS 去哪找，会报
+>   `Could not find force field 'charm36' in current directory, install tree or GMXLIB path`。
+> - Ubuntu 的 `~/.bashrc` 开头有交互守卫
+>   （`case $- in *i*) ;; *) return;; esac`），**非交互 shell 会直接 return**，
+>   所以只写 `~/.bashrc` 在 `bash -c` / 脚本 / cron 里不生效，
+>   要覆盖这些场景只能走方式 A，或至少同时写进 `~/.profile`（登录 shell 会读）。
+>
+> `scripts/install_all.sh --with-charmm36` 会**自动处理这个二选一**：
+> 能写系统库就写系统库（并且不再设 GMXLIB），否则退回 GMXLIB 方式。
 
 > `scripts/install_all.sh --with-charmm36` **会自动完成第 1、2 步**（含补丁）。
 > `charmm36.ff` 自带 `tip3p.itp`（CHARMM modified TIP3P），不需要从别处补。
@@ -730,6 +752,7 @@ MM/PBSA 侧：CHARMM 体系要用 `PBRadii = 7`（charmm_radii，见 6.2 之外�
 | `water model 'tips3p' not found` | 你在用 `amber99sb.ff` 而不是 `charmm27.ff`/`charmm36.ff` | `tips3p` 只在 CHARMM 目录里有 |
 | CHARMM36 结果异常（密度/能量不合理） | mdp 没按官方改满 10 项 | 换用 `assets/mdp/charmm36_*.mdp` |
 | `Could not find force field 'charmm36'` | 力场放在 `~/apps/` 但没告诉 GROMACS 去哪找 | 设 `GMXLIB`（写进 `~/.bashrc` + `~/.profile`），或 `sudo cp` 到 `/usr/local/share/gromacs/top/` |
+| `Force field 'charmm36' occurs in 2 places` | 系统力场库和 `GMXLIB` 里**同时**有 charmm36.ff | 二选一：要么只留系统库（删掉 `GMXLIB`），要么只留 `GMXLIB`（把系统库那份删掉） |
 | `atom C1 not found in buiding block 1MET` | charmm36.ff 的 `ethers.n.tdb` 段名与 GROMACS 约定冲突 | `sed -i 's/\[ MET1 \]/[ ETHERS_MET1 ]/; s/\[ HYD1 \]/[ ETHERS_HYD1 ]/'` |
 | grompp 报 `vdw-modifier` 相关警告 | 模板是通用模板（无 force-switch） | 同上 |
 | `could not convert string to float: '*********'` | 某残基能量溢出（常见于 OPLS 拓扑转换） | 换 AMBER 系蛋白力场；见 `references/mmpbsa.md` |

@@ -404,11 +404,16 @@ mv charmm36-jul2022.ff charmm36.ff
 # 【必须】打段名补丁
 sed -i 's/\[ MET1 \]/[ ETHERS_MET1 ]/; s/\[ HYD1 \]/[ ETHERS_HYD1 ]/' charmm36.ff/ethers.n.tdb
 sudo cp -r charmm36.ff /usr/local/share/gromacs/top/     # 推荐, 最省心
-# 免 sudo 的替代(必须设, 否则报 Could not find force field 'charmm36'):
-#   export GMXLIB=/usr/local/share/gromacs/top:$HOME/apps/charmm36
-#   写进 ~/.bashrc(交互式)和 ~/.profile(登录 shell), 因为 .bashrc 开头有交互守卫,
-#   非交互脚本(bash -c / cron)里 .bashrc 会直接 return。
 ```
+
+> ⚠️ **系统力场库和 `GMXLIB` 只能二选一**。两边都有 `charmm36.ff` 时 GROMACS 会报
+> `Force field 'charmm36' occurs in 2 places, but not in the current directory.`（本机实测）。
+>
+> 免 sudo 的替代（此时系统库里就**不能**再有同名力场）：
+> `export GMXLIB=/usr/local/share/gromacs/top:$HOME/apps/charmm36`，
+> 写进 `~/.bashrc`（交互式）和 `~/.profile`（登录 shell）——
+> Ubuntu 的 `.bashrc` 开头有交互守卫，非交互脚本（`bash -c` / cron）里 `.bashrc` 会直接 return，
+> 所以非交互场景只能走 `sudo` 那条路。
 
 > `scripts/install_all.sh --with-charmm36` **会自动完成下载 + 打补丁 + 写 GMXLIB**。
 

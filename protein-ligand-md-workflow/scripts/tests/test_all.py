@@ -429,5 +429,75 @@ def t_rama_scatter():
           "analyze.sh 里 plot_rama.py 的路径写成了 /scripts/... 绝对路径")
 
 
+
+# =========================================================================
+# 9. 报告内容完整性与排版
+# =========================================================================
+def _load_make_report():
+    import importlib.util
+    path = SKILL / "scripts" / "make_report.py"
+    spec = importlib.util.spec_from_file_location("_mr_under_test", str(path))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@case("报告: MM/PBSA 的 ΔG 能从 gmx_MMPBSA 输出里正确解析")
+def t_mmpbsa_parse():
+    import tempfile
+    mod = _load_make_report()
+    # 1.7 格式: Average | SD(Prop.) | SD | SEM(Prop.) | SEM | Block SD | Block SEM
+    new_fmt = (
+        "Delta (Complex - Receptor - Ligand):\n"
+        "Energy Component       Average     SD(Prop.)         SD   SEM(Prop.)"
+        "        SEM   Block SD  Block SEM\n"
+        + "-" * 100 + "\n"
+        "\u0394TOTAL                   17.25    1740390.66      50.49"
+        "    524747.53      15.22       2.35       1.66\n"
+    )
+    # 老格式: Value | Average | Std Dev | Std Err of Est. | Number of Samples
+    old_fmt = (
+        "Delta (Complex - Receptor - Ligand):\n"
+        "Energy Component       Value      Average      Std Dev"
+        "    Std Err of Est.   Number of Samples\n"
+        + "-" * 100 + "\n"
+        "\u0394TOTAL                 -17.25     -17.25       1.70"
+        "       1.66              11\n"
+    )
+    for text, want_dg, want_bs in ((new_fmt, 17.25, 1.66),
+                                   (old_fmt, -17.25, 1.66)):
+        with tempfile.TemporaryDirectory() as td:
+            Path(td, "mmpbsa.out").write_text(text, encoding="utf-8")
+            got = mod._parse_mmpbsa(Path(td))
+        check(got is not None, "解析 mmpbsa.out 失败")
+        check(abs(got["dG"] - want_dg) < 1e-6,
+              "ΔG 解析错误: 期望 %s, 实际 %s" % (want_dg, got["dG"]))
+        check(got.get("block_sem") is not None
+              and abs(got["block_sem"] - want_bs) < 1e-6,
+              "Block SEM 解析错误: 期望 %s, 实际 %s" % (want_bs, got.get("block_sem")))
+
+
+@case("报告: 正文字号为 12 号")
+def t_body_font_size():
+    txt = read(SKILL / "scripts" / "make_report.py")
+    m = re.search(r"^BODY_FS\s*=\s*([\d.]+)", txt, re.M)
+    check(m, "make_report.py 里找不到 BODY_FS 常量")
+    check(float(m.group(1)) == 12.0,
+          "正文字号应为 12 号, 实际 %s" % m.group(1))
+    check("BODY_FS" in txt and "fontSize=BODY_FS" in txt,
+          "正文样式没有走 BODY_FS 常量")
+
+
+@case("报告: 界面分析/能量图/产物清单都在报告里")
+def t_report_sections():
+    txt = read(SKILL / "scripts" / "make_report.py")
+    for key, why in (("\u754c\u9762\u76f8\u4e92\u4f5c\u7528\u5206\u6790", "界面分析页"),
+                     ("RIN", "残基-残基接触网络表"),
+                     ("\u5206\u6790\u4ea7\u7269\u6e05\u5355", "分析产物清单页"),
+                     ("energy.png", "体系能量分量图")):
+        check(key in txt, "报告里缺少" + why)
+
+
+
 if __name__ == "__main__":
     sys.exit(main())

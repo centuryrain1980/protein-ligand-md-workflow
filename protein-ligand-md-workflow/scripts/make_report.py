@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import csv as csv_mod
 import html as html_mod
 import json
 import math
@@ -37,6 +38,51 @@ import traceback
 from pathlib import Path
 
 # 系统里常见的中日韩字体(按显示效果排序), 找不到就用 reportlab 内置 CID 字体
+# ---- 排版字号(单位: 磅, 1 磅 = 1/72 英寸) ----
+# 正文默认 12 号, 符合常规中文报告/论文的阅读习惯;
+# 想改小一号就把这三个数改小即可, 全篇会一起生效。
+BODY_FS = 12.0      # 正文字号
+CAP_FS = 11.0       # 图注/说明文字字号
+TBL_FS = 12.0       # 表格文字字号
+
+# 报告里"分析产物清单"要列哪些文件。
+# 用白名单而不是扫描整个目录: 目录里可能有用户自己的中间文件或历史副本,
+# 全扫进来会让清单变得杂乱, 而且会把调试残留当成正式产物。
+# 每项: 文件名 -> 类型
+ARTIFACT_KINDS = {
+    "rmsd.xvg": "曲线数据", "rmsd.png": "图片",
+    "rmsf.xvg": "曲线数据", "rmsf.png": "图片",
+    "gyrate.xvg": "曲线数据", "gyrate.png": "图片",
+    "sasa.xvg": "曲线数据", "sasa.png": "图片",
+    "energy_sys.xvg": "曲线数据", "energy.png": "图片",
+    "binding.xvg": "曲线数据", "binding.png": "图片",
+    "hbond_num.xvg": "曲线数据", "hbond.png": "图片",
+    "hbond_dist.xvg": "曲线数据",
+    "dssp_out.xpm": "位图数据", "dssp.png": "图片", "dssp.dat": "二级结构文本",
+    "dssp_out_residue.xvg": "曲线数据", "dssp_out_sc.xvg": "曲线数据",
+    "rama.xvg": "曲线数据", "rama.png": "图片", "rama_stat.txt": "统计",
+    "interface_summary.json": "汇总数据", "interface_map.png": "图片",
+    "interface_events.csv": "表格数据", "interface_residues.csv": "表格数据",
+    "interface_rin.csv": "表格数据",
+    "ligand_2d.png": "图片",
+}
+
+# 这些文件的内容是以文字表格形式进了报告(不是以图的形式), 单独标一下
+ARTIFACT_SHOWN_DIRECT = {
+    "interface_summary.json",   # 界面分析页的统计表
+    "interface_rin.csv",        # 界面分析页的 RIN 网络表
+    "ligand_2d.png",            # 配体 2D 结构页
+}
+
+# 曲线文件 -> 对应图片(用于判断"这张图是否已进报告")
+ARTIFACT_PAIR = {
+    "rmsd.xvg": "rmsd.png", "rmsf.xvg": "rmsf.png",
+    "gyrate.xvg": "gyrate.png", "sasa.xvg": "sasa.png",
+    "energy_sys.xvg": "energy.png", "binding.xvg": "binding.png",
+    "hbond_num.xvg": "hbond.png", "rama.xvg": "rama.png",
+    "interface_map.png": "interface_map.png", "ligand_2d.png": "ligand_2d.png",
+}
+
 CJK_FONT_CANDIDATES = [
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
@@ -71,6 +117,9 @@ FIGURES = [
      "数值越负表示结合越紧密。"),
     ("hbond_num.xvg", "hbond.png", "氢键数量",
      "蛋白内部氢键随时间的变化。氢键网络的崩解常常先于整体构象变化出现。"),
+    ("energy_sys.xvg", "energy.png", "体系能量分量",
+     "范德华短程项、离散校正、库仑短程项与长程静电项随时间的变化。"
+     "曲线平稳说明体系在模拟过程中没有出现能量爆炸或温度失控。"),
     ("dssp.png", "dssp.png", "二级结构含量",
      "用 gmx dssp 判定的二级结构比例随时间的变化。"),
     ("interface_map.png", "interface_map.png", "界面接触频率热图",
@@ -82,6 +131,19 @@ FIGURES = [
 # ----------------------------------------------------------------------
 # 小工具
 # ----------------------------------------------------------------------
+def _fmt_size(n):
+    """字节数 -> 人类可读。"""
+    try:
+        n = float(n)
+    except (TypeError, ValueError):
+        return "-"
+    if n < 1024:
+        return "%d B" % n
+    if n < 1024 * 1024:
+        return "%.1f KB" % (n / 1024.0)
+    return "%.1f MB" % (n / 1024.0 / 1024.0)
+
+
 def _read_xvg(path):
     """读 xvg, 返回 (列名列表, 数据行列表)。"""
     names, rows = [], []
@@ -131,21 +193,48 @@ def _fmt(v, unit="", nd=2):
 
 
 def _parse_mmpbsa(work):
-    """从 mmpbsa.out 解析 ΔG_bind (Delta 段的 ΔTOTAL 行)。"""
+    r"""从 mmpbsa.out 解析 ΔG_bind (Delta 段的 ΔTOTAL 行)。
+
+    gmx_MMPBSA 的输出有两种列格式, 必须先看表头再取数, 否则会取错列:
+      * 1.7 及以后: Average | SD(Prop.) | SD | SEM(Prop.) | SEM | Block SD | Block SEM
+        —— 第 1 个数就是 ΔG, 第 7 个数是 Block SEM
+      * 1.5 及以前: Value | Average | Std Dev | Std Err of Est. | Number of Samples
+        —— 第 1 个数是 Value, 第 2 个数才是 ΔG
+    另外 Δ 行的能量项带希腊字母前缀(ΔTOTAL), 不能用 \W* 去匹配。
+    """
     p = Path(work) / "mmpbsa.out"
     if not p.is_file():
         return None
     txt = p.read_text(errors="replace")
-    m = re.search(r"Delta \(Complex - Receptor - Ligand\):(.*?)-{20,}", txt, re.S)
+    m = re.search(r"Delta \(Complex - Receptor - Ligand\):(.*)", txt, re.S)
     if not m:
         return None
-    row = re.search(r"^\W*TOTAL\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+"
-                    r"([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)", m.group(1), re.M)
+    seg = m.group(1)
+
+    # 表头: "Energy Component       Average     SD(Prop.) ... Block SEM"
+    head = re.search(r"^([^\n]*)\n-{10,}", seg, re.M)
+    header = head.group(1) if head else ""
+
+    # TOTAL 行(可能带 Δ 前缀)
+    row = re.search(r"^\s*(?:\u0394\s*)?TOTAL\s+(.*)$", seg, re.M)
     if not row:
         return None
-    g = row.groups()
-    return {"dG": float(g[0]), "sem": float(g[4]), "block_sd": float(g[5]),
-            "block_sem": float(g[6])}
+    nums = [float(x) for x in
+            re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", row.group(1))]
+    if not nums:
+        return None
+
+    if "Block SD" in header:          # 1.7 格式
+        dG = nums[0]
+        sem = nums[4] if len(nums) >= 5 else None
+        block_sd = nums[5] if len(nums) >= 6 else None
+        block_sem = nums[6] if len(nums) >= 7 else None
+    else:                             # 老格式: 第 2 列才是 Average
+        dG = nums[1] if len(nums) >= 2 else nums[0]
+        sem = nums[3] if len(nums) >= 4 else None
+        block_sd = None
+        block_sem = nums[3] if len(nums) >= 4 else None
+    return {"dG": dG, "sem": sem, "block_sd": block_sd, "block_sem": block_sem}
 
 
 def _gmx_version():
@@ -238,6 +327,16 @@ def collect(work, prot, lig, ligand_file=None, want_ligand=True):
         v = _stat(_col(rows, 1))
         if v:
             add("蛋白内氢键数 平均", _fmt(v["mean"], "", 1))
+    rst = ana / "rama_stat.txt"
+    if rst.is_file():
+        try:
+            for line in rst.read_text(encoding="utf-8", errors="replace").splitlines():
+                if line.strip().startswith("in_allowed_fraction="):
+                    add("Ramachandran 允许区占比",
+                        line.strip().split("=", 1)[1].strip() + " %")
+        except Exception as exc:
+            print("[make_report] 读取 rama_stat.txt 失败: %r" % (exc,), file=sys.stderr)
+
     dg = _parse_mmpbsa(work)
     info["mmpbsa"] = dg
     if dg:
@@ -273,6 +372,46 @@ def collect(work, prot, lig, ligand_file=None, want_ligand=True):
             if lig_png:
                 break
     info["ligand_png"] = lig_png
+
+    # 残基-残基接触网络(RIN): 只在 CSV 里, 这里读进来好放进报告
+    rin = []
+    rin_f = ana / "interface_rin.csv"
+    if rin_f.is_file():
+        try:
+            with open(rin_f, newline="", encoding="utf-8", errors="replace") as fh:
+                for row in csv_mod.DictReader(fh):
+                    rin.append({k: (v if v is not None else "") for k, v in row.items()})
+        except Exception as exc:
+            print("[make_report] 读取 interface_rin.csv 失败: %r" % (exc,), file=sys.stderr)
+            rin = []
+    info["rin"] = rin
+
+    # 分析产物清单: 按白名单列出分析流程真正产出的文件, 并标出哪些已进报告
+    shown = {f[1] for f in FIGURES if f[1]}
+    art = []
+    for name, kind in ARTIFACT_KINDS.items():
+        f = ana / name
+        if not f.is_file():
+            continue
+        try:
+            size = f.stat().st_size
+        except OSError:
+            size = 0
+        png = ARTIFACT_PAIR.get(name, name if name.endswith(".png") else None)
+        art.append({"name": name, "kind": kind, "size": size,
+                    "shown": bool((png and png in shown)
+                                  or name in ARTIFACT_SHOWN_DIRECT)})
+    logs = sorted(ana.glob("*.log"))
+    if logs:
+        total = 0
+        for f in logs:
+            try:
+                total += f.stat().st_size
+            except OSError:
+                pass
+        art.append({"name": "*.log (%d 个过程日志)" % len(logs), "kind": "过程日志",
+                    "size": total, "shown": False})
+    info["artifacts"] = art
 
     for xvg, png, title, desc in FIGURES:
         px = ana / png if png else None
@@ -364,18 +503,18 @@ def write_pdf(info, outpath, page_size="A4"):
     ss = getSampleStyleSheet()
     st_title = ParagraphStyle("t", parent=ss["Title"], fontName=FONT, fontSize=20,
                               leading=26, spaceAfter=10)
-    st_sub = ParagraphStyle("s", parent=ss["Normal"], fontName=FONT, fontSize=10,
-                             leading=15, textColor=colors.HexColor("#555555"))
+    st_sub = ParagraphStyle("s", parent=ss["Normal"], fontName=FONT, fontSize=BODY_FS,
+                             leading=BODY_FS * 1.5, textColor=colors.HexColor("#555555"))
     st_h1 = ParagraphStyle("h1", parent=ss["Heading1"], fontName=FONT, fontSize=15,
                             leading=20, spaceBefore=12, spaceAfter=6,
                             textColor=colors.HexColor("#1a3d5c"))
     st_h2 = ParagraphStyle("h2", parent=ss["Heading2"], fontName=FONT, fontSize=12,
                             leading=17, spaceBefore=8, spaceAfter=4,
                             textColor=colors.HexColor("#2c5f85"))
-    st_body = ParagraphStyle("b", parent=ss["Normal"], fontName=FONT, fontSize=9.5,
-                              leading=14.5)
-    st_cap = ParagraphStyle("c", parent=ss["Normal"], fontName=FONT, fontSize=8.5,
-                            leading=12, textColor=colors.HexColor("#555555"),
+    st_body = ParagraphStyle("b", parent=ss["Normal"], fontName=FONT, fontSize=BODY_FS,
+                              leading=BODY_FS * 1.5)
+    st_cap = ParagraphStyle("c", parent=ss["Normal"], fontName=FONT, fontSize=CAP_FS,
+                            leading=CAP_FS * 1.5, textColor=colors.HexColor("#555555"),
                             spaceAfter=8)
 
     story = []
@@ -395,7 +534,7 @@ def write_pdf(info, outpath, page_size="A4"):
     ]
     t = Table(cover, colWidths=[38 * mm, 118 * mm])
     t.setStyle(TableStyle([
-        ("FONT", (0, 0), (-1, -1), FONT, 9.5),
+        ("FONT", (0, 0), (-1, -1), FONT, TBL_FS),
         ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#666666")),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ("TOPPADDING", (0, 0), (-1, -1), 4),
@@ -413,8 +552,8 @@ def write_pdf(info, outpath, page_size="A4"):
     rows = [["指标", "数值"]] + [[l, str(v)] for l, v, _ in info["metrics"]]
     t = Table(rows, colWidths=[70 * mm, 60 * mm], repeatRows=1)
     t.setStyle(TableStyle([
-        ("FONT", (0, 0), (-1, 0), FONT, 9.5),
-        ("FONT", (0, 1), (-1, -1), FONT, 9.5),
+        ("FONT", (0, 0), (-1, 0), FONT, TBL_FS),
+        ("FONT", (0, 1), (-1, -1), FONT, TBL_FS),
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef3f8")),
         ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cccccc")),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -465,8 +604,8 @@ def write_pdf(info, outpath, page_size="A4"):
             rows.append(["证据强度 · " + str(k), v])
         t2 = Table(rows, colWidths=[70 * mm, 60 * mm], repeatRows=1)
         t2.setStyle(TableStyle([
-            ("FONT", (0, 0), (-1, 0), FONT, 9.5),
-            ("FONT", (0, 1), (-1, -1), FONT, 9.5),
+            ("FONT", (0, 0), (-1, 0), FONT, TBL_FS),
+            ("FONT", (0, 1), (-1, -1), FONT, TBL_FS),
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef3f8")),
             ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cccccc")),
             ("TOPPADDING", (0, 0), (-1, -1), 4),
@@ -485,14 +624,63 @@ def write_pdf(info, outpath, page_size="A4"):
                 r2.append([rname, chain, r.get("ligand", ""), r.get("contacts", "")])
             t3 = Table(r2, colWidths=[45 * mm, 20 * mm, 40 * mm, 30 * mm], repeatRows=1)
             t3.setStyle(TableStyle([
-                ("FONT", (0, 0), (-1, 0), FONT, 9.5),
-                ("FONT", (0, 1), (-1, -1), FONT, 9.5),
+                ("FONT", (0, 0), (-1, 0), FONT, TBL_FS),
+                ("FONT", (0, 1), (-1, -1), FONT, TBL_FS),
                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef3f8")),
                 ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cccccc")),
                 ("TOPPADDING", (0, 0), (-1, -1), 4),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
             ]))
             story.append(t3)
+        rin = info.get("rin") or []
+        if rin:
+            story.append(Spacer(1, 4 * mm))
+            story.append(Paragraph("残基-残基接触网络 (RIN)", st_h2))
+            story.append(Paragraph(
+                "把每一帧里蛋白与配体互相接触的残基对汇总成网络: "
+                "ContactCount 为总接触次数, ContactsPerFrame 为平均每帧接触次数, "
+                "FractionOfFrames 为该残基对在多少比例的帧里出现。", st_body))
+            r3 = [["蛋白残基", "配体残基", "总接触次数", "每帧平均", "出现帧比例"]]
+            for row in rin[:15]:
+                r3.append([row.get("ProteinResidue", ""), row.get("LigandResidue", ""),
+                           row.get("ContactCount", ""), row.get("ContactsPerFrame", ""),
+                           row.get("FractionOfFrames", "")])
+            t4 = Table(r3, colWidths=[42 * mm, 32 * mm, 30 * mm, 30 * mm, 30 * mm],
+                       repeatRows=1)
+            t4.setStyle(TableStyle([
+                ("FONT", (0, 0), (-1, 0), FONT, TBL_FS),
+                ("FONT", (0, 1), (-1, -1), FONT, TBL_FS),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef3f8")),
+                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cccccc")),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]))
+            story.append(t4)
+        story.append(PageBreak())
+
+    # ---------- 分析产物清单 ----------
+    art = info.get("artifacts") or []
+    if art:
+        story.append(Paragraph("分析产物清单", st_h1))
+        story.append(Paragraph(
+            "分析流程在 analysis 目录下产出的全部文件。标记为\u201c已进报告\u201d的, "
+            "其内容可以在本报告的图表页里直接看到; 其余是更详细的原始数据, "
+            "需要时用对应脚本单独作图。", st_body))
+        story.append(Spacer(1, 3 * mm))
+        a_rows = [["文件", "类型", "大小", "是否已进报告"]]
+        for a in art:
+            a_rows.append([a["name"], a["kind"], _fmt_size(a["size"]),
+                           "已进报告" if a["shown"] else "仅文件"])
+        ta = Table(a_rows, colWidths=[70 * mm, 28 * mm, 24 * mm, 32 * mm], repeatRows=1)
+        ta.setStyle(TableStyle([
+            ("FONT", (0, 0), (-1, 0), FONT, TBL_FS),
+            ("FONT", (0, 1), (-1, -1), FONT, TBL_FS),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef3f8")),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cccccc")),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        story.append(ta)
         story.append(PageBreak())
 
     # ---------- 各图 ----------
@@ -524,7 +712,7 @@ def write_pdf(info, outpath, page_size="A4"):
     ]
     t = Table(meta, colWidths=[38 * mm, 118 * mm])
     t.setStyle(TableStyle([
-        ("FONT", (0, 0), (-1, -1), FONT, 9),
+        ("FONT", (0, 0), (-1, -1), FONT, TBL_FS),
         ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#666666")),
         ("LINEBELOW", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
         ("TOPPADDING", (0, 0), (-1, -1), 4),

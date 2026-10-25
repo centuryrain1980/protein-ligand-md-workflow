@@ -130,6 +130,8 @@ if [ -f analysis/rama.xvg ]; then
 fi
 plot analysis/binding.xvg   analysis/binding.png
 plot analysis/hbond_num.xvg analysis/hbond.png
+# 体系能量分量 (范德华/离散校正/库仑/长程静电): 稳定性检查用
+plot analysis/energy_sys.xvg analysis/energy.png
 
 if [ -f analysis/dssp_out.xpm ]; then
   dit xpm_show -f analysis/dssp_out.xpm -o analysis/dssp.png > analysis/plot.log 2>&1

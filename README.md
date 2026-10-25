@@ -79,9 +79,9 @@ mdflow.py report   --workdir proj --title "我的体系"
 | 轨迹分析 | `analyze.sh` | 8 张分析图（Ramachandran 为散点图） |
 | MM/PBSA | `run_mmpbsa.sh` | ΔG_bind + 逐残基分解 |
 | 界面相互作用 | `interface_analysis.py` | 事件级 CSV + RIN + 热图 |
-| PDF 报告 | `make_report.py` | `analysis/report.pdf`（约 14 页，含界面分析页） |
+| PDF 报告 | `make_report.py` | `analysis/report.pdf`（约 17 页，含界面分析页与产物清单） |
 | 分子对接 | `dock_ligand.sh` | 多构象 SDF + CNN 重打分 |
-| 回归测试 | `scripts/tests/` | 22 个用例 |
+| 回归测试 | `scripts/tests/` | 25 个用例 |
 
 ---
 
@@ -117,7 +117,7 @@ mdflow.py report   --workdir proj --title "我的体系"
 | **0. 环境一键安装** | **`install_all.sh`** | **新机器上一条命令装齐全部依赖**：系统包 → GROMACS 2025 编译 → Python 工具链 → MM/PBSA 环境 → 对接工具 → PATH 持久化 → 自检。幂等，已装好的自动跳过 |
 | **0. 环境自检** | `setup_env.sh` | 一键检查 GROMACS / dit / acpype / obabel / vina / gnina / 分析库是否就位，并给出安装建议 |
 | **0. 统一入口** | **`mdflow.py`** | 一条命令跑完整个流水线：`verify → prepare → solvate → simulate → analyze → report`，任何子命令都能单独调用，支持 `--dry-run` 预演 |
-| **0. 结果报告** | **`make_report.py`** | 把分析结果汇总成**带目录的 PDF 报告**（封面 + 关键指标表 + 配体 2D 结构 + 每张图一页 + 方法说明），可直接进论文补充材料；无 reportlab 时自动降级为 HTML |
+| **0. 结果报告** | **`make_report.py`** | 把分析结果汇总成**带目录的 PDF 报告**（封面 + 关键指标表 + 配体 2D 结构 + **界面相互作用分析** + **RIN 接触网络** + **分析产物清单** + 每张图一页 + 方法说明），正文字号 **12 号**，可直接进论文补充材料；无 reportlab 时自动降级为 HTML |
 | **0.5 力场选型** | `references/force-fields.md` | 本机可用力场清单、选型决策树、水模型配对表、CHARMM36 官方强制 mdp、AMBER→GROMACS 转换细节 |
 | **1. 分子对接** | `dock_ligand.sh` | gnina（Vina 打分 + CNN 深度学习重打分）把配体送进口袋；自动定盒子、转 PDBQT |
 | **2. 配体参数化** | `setup_ligand.sh` | **SMILES → 3D → GAFF 参数 → 力场合并 → 复合物组装**，一条命令 |
@@ -690,7 +690,7 @@ bash ~/.codex/skills/protein-ligand-md-workflow/scripts/make_report.py <工作�
      --title "我的体系" --ligand-file lig.mol2
 ```
 
-产出 `<工作目录>/analysis/report.pdf`（约 1.2 MB，14 页）：
+产出 `<工作目录>/analysis/report.pdf`（约 1.4 MB，17 页）：
 
 | 页 | 内容 |
 |---|---|
@@ -698,8 +698,13 @@ bash ~/.codex/skills/protein-ligand-md-workflow/scripts/make_report.py <工作�
 | 2 | 关键指标摘要表（RMSD / RMSF / Rg / SASA / 氢键 / ΔG_bind），数值**直接解析自 .xvg 与 mmpbsa.out**，不二次计算 |
 | 3 | 配体 2D 结构式（rdkit 绘制） |
 | 4 | **界面相互作用分析**（若存在 `analysis/interface_summary.json`）：事件总数、分类统计、证据强度、接触最多的界面残基 |
-| 5–13 | 每张分析图一页，带图题与结果解读 |
-| 14 | 方法与参数、引用提示 |
+| 5 | **残基-残基接触网络（RIN）**：蛋白残基 ↔ 配体残基的接触次数、每帧平均、出现帧比例 |
+| 6 | **分析产物清单**：分析流程产出的每个文件、类型、大小，以及是否已进报告 |
+| 7–16 | 每张分析图一页，带图题与结果解读（RMSD / RMSF / Rg / SASA / Ramachandran / 组间相互作用能 / 氢键 / 体系能量分量 / 二级结构 / 界面接触热图） |
+| 17 | 方法与参数、引用提示 |
+
+> **正文字号 12 号**：报告正文、表格、图注统一走 `make_report.py` 顶部的三个常量
+> `BODY_FS`（正文 12）、`CAP_FS`（图注 11）、`TBL_FS`（表格 12），想整体调小只改这三个数即可。
 
 选项：`--html` 强制输出 HTML；`--page-size landscape` 出横向 PDF；
 `--no-ligand` 不画配体结构。
@@ -765,7 +770,7 @@ bash <skill>/scripts/tests/run_tests.sh --fast     # 跳过需要真跑 GROMACS 
 bash <skill>/scripts/tests/run_tests.sh -k mdp     # 只跑名字里含 mdp 的
 ```
 
-22 个用例覆盖：
+25 个用例覆盖：
 
 - **脚本语法**：所有 `.sh` 过 `bash -n`，所有 `.py` 可编译，并且**逐个真正 import 一次**（能抓出被换行或吞字符造成的静默损坏，这类问题 `py_compile` 发现不了）
 - **mdp 关键参数**：CHARMM 模板必须含官方强制的 10 项；`rcoulomb` 必须等于 `rvdw`（Verlet+PME 要求）；通用模板必须用 `Linear`+`System`
@@ -775,6 +780,8 @@ bash <skill>/scripts/tests/run_tests.sh -k mdp     # 只跑名字里含 mdp 的
 - **隐私**：不含 token / 私钥 / 硬编码的用户目录
 - **报告渲染守卫**：`make_report.py` 必须 `import json`、必须定义 `st_h2` 样式、`interface_map.png` / `dssp.png` 的 png 字段不能是 `None`（否则界面分析会静默丢失、页面会崩）
 - **作图守卫**：`analyze.sh` 的 Ramachandran 必须走 `plot_rama.py` 散点，且脚本路径必须用 `$SCRIPT_DIR`（写死绝对路径会在别的机器上找不到脚本）
+- **MM/PBSA 解析**：用 gmx_MMPBSA 1.7 与 1.5 两种列格式的样例输出，验证 ΔG 与 Block SEM 都能正确取到列（取错列会静默给出错误数值）
+- **排版**：正文字号必须是 12 号；界面分析页、RIN 表、产物清单页、能量图都必须在报告里
 - **许可**：不得集成 AGPL-3.0 的 `charmm2gmx` 代码
 
 ---

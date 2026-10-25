@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import html as html_mod
+import json
 import math
 import os
 import re
@@ -63,15 +64,18 @@ FIGURES = [
     ("sasa.xvg", "sasa.png", "溶剂可及面积 SASA",
      "蛋白整体的溶剂可及表面积。数值下降通常对应疏水核心被埋藏或构象收紧。"),
     ("rama.xvg", "rama.png", "Ramachandran 图",
-     "主链 φ/ψ 角分布。落在右上/左下两个允许区域说明二级结构合理; "
+     "主链 φ/ψ 角的散点分布(每点一个残基, 不连线)。落在右上/左下两个允许区域说明二级结构合理; "
      "出现大量异常点提示力场或质子化状态需要检查。"),
     ("binding.xvg", "binding.png", "组间相互作用能",
      "蛋白组与配体组之间的范德华与静电相互作用能(需在 mdp 里设过 energygrps)。"
      "数值越负表示结合越紧密。"),
     ("hbond_num.xvg", "hbond.png", "氢键数量",
      "蛋白内部氢键随时间的变化。氢键网络的崩解常常先于整体构象变化出现。"),
-    ("dssp.png", None, "二级结构含量",
+    ("dssp.png", "dssp.png", "二级结构含量",
      "用 gmx dssp 判定的二级结构比例随时间的变化。"),
+    ("interface_map.png", "interface_map.png", "界面接触频率热图",
+     "配体与蛋白界面残基的接触次数热图(颜色越亮接触越多), "
+     "由 scripts/interface_analysis.py 生成。"),
 ]
 
 
@@ -240,6 +244,23 @@ def collect(work, prot, lig, ligand_file=None, want_ligand=True):
         add("ΔG_bind (kcal/mol)", _fmt(dg["dG"], "", 2))
         add("ΔG_bind Block SEM", _fmt(dg["block_sem"], "", 2))
 
+    isum = ana / "interface_summary.json"
+    if isum.is_file():
+        try:
+            js = json.loads(isum.read_text(encoding="utf-8"))
+            info["interface"] = js
+            add("界面相互作用事件数", js.get("total_events", "—"))
+            add("界面残基数", js.get("interface_residues", "—"))
+            for k, v in (js.get("by_interaction_class") or {}).items():
+                add("界面事件 · " + str(k), v)
+            if js.get("ligand_resname"):
+                add("配体残基名", js["ligand_resname"])
+        except Exception as _exc:
+            print("[make_report] read interface_summary.json failed: %r" % (_exc,), file=sys.stderr)
+            info["interface"] = None
+    else:
+        info["interface"] = None
+
     lig_png = None
     if want_ligand:
         cands = []
@@ -348,6 +369,9 @@ def write_pdf(info, outpath, page_size="A4"):
     st_h1 = ParagraphStyle("h1", parent=ss["Heading1"], fontName=FONT, fontSize=15,
                             leading=20, spaceBefore=12, spaceAfter=6,
                             textColor=colors.HexColor("#1a3d5c"))
+    st_h2 = ParagraphStyle("h2", parent=ss["Heading2"], fontName=FONT, fontSize=12,
+                            leading=17, spaceBefore=8, spaceAfter=4,
+                            textColor=colors.HexColor("#2c5f85"))
     st_body = ParagraphStyle("b", parent=ss["Normal"], fontName=FONT, fontSize=9.5,
                               leading=14.5)
     st_cap = ParagraphStyle("c", parent=ss["Normal"], fontName=FONT, fontSize=8.5,
@@ -419,6 +443,56 @@ def write_pdf(info, outpath, page_size="A4"):
             story.append(Image(info["ligand_png"], width=w, height=h))
         except Exception:
             story.append(Paragraph("(配体结构图无法嵌入)", st_cap))
+        story.append(PageBreak())
+
+    # ---------- 界面相互作用专页 ----------
+    if info.get("interface"):
+        js = info["interface"]
+        story.append(Paragraph("界面相互作用分析", st_h1))
+        story.append(Paragraph(
+            "由 scripts/interface_analysis.py 生成: 逐帧扫描配体-蛋白接触, "
+            "并按拓扑信息(元素/电荷/残基名)与几何证据保守分类; "
+            "判不出具体类型的一律记为 Other Contact, 不臆测化学类型。", st_body))
+        story.append(Spacer(1, 3 * mm))
+        rows = [["项目", "数值"]]
+        rows.append(["分析帧数", js.get("frames_analysed", "—")])
+        rows.append(["相互作用事件总数", js.get("total_events", "—")])
+        rows.append(["界面残基数", js.get("interface_residues", "—")])
+        rows.append(["配体残基名", js.get("ligand_resname", "—")])
+        for k, v in (js.get("by_interaction_class") or {}).items():
+            rows.append(["分类 · " + str(k), v])
+        for k, v in (js.get("by_validation_status") or {}).items():
+            rows.append(["证据强度 · " + str(k), v])
+        t2 = Table(rows, colWidths=[70 * mm, 60 * mm], repeatRows=1)
+        t2.setStyle(TableStyle([
+            ("FONT", (0, 0), (-1, 0), FONT, 9.5),
+            ("FONT", (0, 1), (-1, -1), FONT, 9.5),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef3f8")),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cccccc")),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        story.append(t2)
+        top = js.get("top_interface_residues") or []
+        if top:
+            story.append(Spacer(1, 4 * mm))
+            story.append(Paragraph("接触最多的界面残基", st_h2))
+            r2 = [["残基", "链", "配体", "接触次数"]]
+            for r in top[:12]:
+                res = str(r.get("residue", ""))
+                chain = res.split(":")[-1] if ":" in res else ""
+                rname = res.split(":")[0] if ":" in res else res
+                r2.append([rname, chain, r.get("ligand", ""), r.get("contacts", "")])
+            t3 = Table(r2, colWidths=[45 * mm, 20 * mm, 40 * mm, 30 * mm], repeatRows=1)
+            t3.setStyle(TableStyle([
+                ("FONT", (0, 0), (-1, 0), FONT, 9.5),
+                ("FONT", (0, 1), (-1, -1), FONT, 9.5),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef3f8")),
+                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cccccc")),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]))
+            story.append(t3)
         story.append(PageBreak())
 
     # ---------- 各图 ----------

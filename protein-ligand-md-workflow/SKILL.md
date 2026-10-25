@@ -45,7 +45,7 @@ description: 蛋白-配体复合物的分子动力学全流程——分子对接
 | 6 生产 MD | 长程轨迹（支持 `--resume` 断点续跑、JSON 计划多阶段） | `references/equilibration.md` |
 | 7 结果分析 | RMSD/能量/二级结构/FEL/图表 | `references/analysis.md` |
 | 7.5 界面分析 | 界面残基识别、相互作用分类（氢键/盐桥/疏水/金属）、RIN 接触网络 | `scripts/interface_analysis.py` |
-| 7.6 结果报告 | 把分析结果汇总成带目录的 PDF（封面+指标表+配体2D+每图一页） | `scripts/make_report.py` |
+| 7.6 结果报告 | 把分析结果汇总成带目录的 PDF（封面+指标表+配体2D+界面分析页+每图一页） | `scripts/make_report.py` |
 | 8 结合自由能 | MM/PBSA (gmx_MMPBSA) | `references/mmpbsa.md` |
 
 **GROMACS 2025 的命令参数有大量变更**（`editconf -center` 变成向量、`grompp` 去掉 `-ff`、警告变错误、`genbox`/`tprconv` 被移除……）。凡是在 GROMACS 2025 上报参数错误或命令卡死，**先读 `references/gromacs-2025-api.md`**，不要照搬旧教程。
@@ -203,5 +203,6 @@ DuIvyTools 的 `dit` 命令负责 xvg/xpm 的可视化与后处理，`scripts/an
 - `scripts/run_mmpbsa.sh` —— 一键跑 MM/PBSA 并汇总结果
 - `scripts/run_simulation.sh` —— 批量执行平衡+生产阶段
 - `scripts/analyze.sh` —— 批量分析并出图
+- `scripts/plot_rama.py` —— Ramachandran **散点图**（`gmx rama` 输出的是逐点 (φ,ψ)，用 `dit xvg_show` 会连成一团乱麻，必须散点画；同时统计允许区占比）
 
 DuIvyTools 本身是 GPLv3 开源项目（https://github.com/CharlesHahn/DuIvyTools），本 skill 的 mdp 模板在其基础上按 GROMACS 2025 修正。

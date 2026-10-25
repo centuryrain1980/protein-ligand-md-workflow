@@ -76,12 +76,12 @@ mdflow.py report   --workdir proj --title "我的体系"
 | 平衡 + 生产 MD | `mdflow.py simulate` | `md.xtc` / `md.edr` |
 | 多阶段平衡计划 | `assets/plan/*.json` | 按 JSON 驱动多阶段 |
 | 断点续跑 | `run_simulation.sh --resume` | 轨迹连续不覆盖 |
-| 轨迹分析 | `analyze.sh` | 8 张分析图 |
+| 轨迹分析 | `analyze.sh` | 8 张分析图（Ramachandran 为散点图） |
 | MM/PBSA | `run_mmpbsa.sh` | ΔG_bind + 逐残基分解 |
 | 界面相互作用 | `interface_analysis.py` | 事件级 CSV + RIN + 热图 |
-| PDF 报告 | `make_report.py` | `analysis/report.pdf`（约 11 页） |
+| PDF 报告 | `make_report.py` | `analysis/report.pdf`（约 14 页，含界面分析页） |
 | 分子对接 | `dock_ligand.sh` | 多构象 SDF + CNN 重打分 |
-| 回归测试 | `scripts/tests/` | 20 个用例 |
+| 回归测试 | `scripts/tests/` | 22 个用例 |
 
 ---
 
@@ -168,7 +168,8 @@ protein-ligand-md-workflow/
         ├── install_all.sh     一键安装全部环境(新机器首选)
     ├── setup_env.sh       环境自检
     ├── mdflow.py          统一命令行入口(verify/prepare/solvate/simulate/analyze/report)
-    ├── make_report.py     生成 PDF 报告(figurebook)
+    ├── make_report.py     生成 PDF 报告(figurebook, 含界面分析页)
+    ├── plot_rama.py       Ramachandran 散点图(带允许区占比统计)
     ├── interface_analysis.py 界面残基与相互作用分类(RIN)
     └── tests/             回归测试(test_all.py + run_tests.sh)
     assets/plan/           JSON 多阶段平衡计划(default / gentle / quick)
@@ -560,6 +561,20 @@ bash analyze.sh <工作目录>
 
 产出 RMSD、RMSF、能量分量、二级结构、Ramachandran、自由能面等图表。
 
+> **Ramachandran 必须是散点图**：`gmx rama` 输出的 `rama.xvg` 是**逐点 (φ, ψ)**，
+> 而 `dit xvg_show` 只会按行顺序连成折线，画出来是一团乱麻。
+> 因此本 skill 用 `scripts/plot_rama.py` 单独画散点，并输出允许区占比：
+>
+> ```bash
+> python3 scripts/plot_rama.py analysis/rama.xvg -o analysis/rama.png \
+>        --stat analysis/rama_stat.txt
+> ```
+>
+> `rama_stat.txt` 里有 `points=` 与 `in_allowed_fraction=`（落在允许区的残基百分比，
+> 常规折叠良好的蛋白一般 > 90%）。
+> **注意**：允许区背景是常见的矩形近似，不是 molprobity 的精确等值线轮廓，
+> 所以这个百分比是**近似值**，适合快速判断有无大量异常点，不宜当严格统计量写进论文。
+
 两条结合能分析路线，**优先第一条**：
 
 1. **GROMACS 2025 原生组间能量** —— mdp 里设
@@ -675,15 +690,16 @@ bash ~/.codex/skills/protein-ligand-md-workflow/scripts/make_report.py <工作�
      --title "我的体系" --ligand-file lig.mol2
 ```
 
-产出 `<工作目录>/analysis/report.pdf`（约 850 KB，11 页）：
+产出 `<工作目录>/analysis/report.pdf`（约 1.2 MB，14 页）：
 
 | 页 | 内容 |
 |---|---|
 | 1 | 封面：标题、体系目录、生成时间、GROMACS 版本、轨迹文件 |
 | 2 | 关键指标摘要表（RMSD / RMSF / Rg / SASA / 氢键 / ΔG_bind），数值**直接解析自 .xvg 与 mmpbsa.out**，不二次计算 |
 | 3 | 配体 2D 结构式（rdkit 绘制） |
-| 4–10 | 每张分析图一页，带图题与结果解读 |
-| 11 | 方法与参数、引用提示 |
+| 4 | **界面相互作用分析**（若存在 `analysis/interface_summary.json`）：事件总数、分类统计、证据强度、接触最多的界面残基 |
+| 5–13 | 每张分析图一页，带图题与结果解读 |
+| 14 | 方法与参数、引用提示 |
 
 选项：`--html` 强制输出 HTML；`--page-size landscape` 出横向 PDF；
 `--no-ligand` 不画配体结构。
@@ -749,7 +765,7 @@ bash <skill>/scripts/tests/run_tests.sh --fast     # 跳过需要真跑 GROMACS 
 bash <skill>/scripts/tests/run_tests.sh -k mdp     # 只跑名字里含 mdp 的
 ```
 
-20 个用例覆盖：
+22 个用例覆盖：
 
 - **脚本语法**：所有 `.sh` 过 `bash -n`，所有 `.py` 可编译，并且**逐个真正 import 一次**（能抓出被换行或吞字符造成的静默损坏，这类问题 `py_compile` 发现不了）
 - **mdp 关键参数**：CHARMM 模板必须含官方强制的 10 项；`rcoulomb` 必须等于 `rvdw`（Verlet+PME 要求）；通用模板必须用 `Linear`+`System`
@@ -757,6 +773,8 @@ bash <skill>/scripts/tests/run_tests.sh -k mdp     # 只跑名字里含 mdp 的
 - **JSON 计划**：结构合法、引用的 mdp 存在、阶段名唯一
 - **文档一致性**：`SKILL.md` 的 `name` 与目录名一致；引用的文件都存在；7 篇 reference 齐全
 - **隐私**：不含 token / 私钥 / 硬编码的用户目录
+- **报告渲染守卫**：`make_report.py` 必须 `import json`、必须定义 `st_h2` 样式、`interface_map.png` / `dssp.png` 的 png 字段不能是 `None`（否则界面分析会静默丢失、页面会崩）
+- **作图守卫**：`analyze.sh` 的 Ramachandran 必须走 `plot_rama.py` 散点，且脚本路径必须用 `$SCRIPT_DIR`（写死绝对路径会在别的机器上找不到脚本）
 - **许可**：不得集成 AGPL-3.0 的 `charmm2gmx` 代码
 
 ---

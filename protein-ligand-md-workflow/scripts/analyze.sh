@@ -8,6 +8,7 @@ WORK="${1:?用法: analyze.sh <工作目录> [蛋白组] [配体组]}"
 PROT="${2:-Protein}"
 LIG="${3:-LIG}"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$WORK" || exit 1
 mkdir -p analysis
 echo "工作目录: $(pwd)   蛋白组: $PROT   配体组: $LIG"
@@ -117,7 +118,16 @@ plot analysis/rmsd.xvg      analysis/rmsd.png
 plot analysis/rmsf.xvg      analysis/rmsf.png
 plot analysis/gyrate.xvg    analysis/gyrate.png
 plot analysis/sasa.xvg      analysis/sasa.png
-plot analysis/rama.xvg      analysis/rama.png
+# Ramachandran 必须画散点: gmx rama 输出的是逐点 (phi,psi),
+# dit xvg_show 只会按顺序连成折线, 出来是一团乱麻 -> 用专门的 plot_rama.py
+if [ -f analysis/rama.xvg ]; then
+  if [ -f "$SCRIPT_DIR/plot_rama.py" ]; then
+    python3 "$SCRIPT_DIR/plot_rama.py" analysis/rama.xvg \
+        -o analysis/rama.png --stat analysis/rama_stat.txt 2>&1 | sed "s/^/  /"
+  else
+    echo "  警告: 找不到 plot_rama.py, Ramachandran 不会出图"
+  fi
+fi
 plot analysis/binding.xvg   analysis/binding.png
 plot analysis/hbond_num.xvg analysis/hbond.png
 

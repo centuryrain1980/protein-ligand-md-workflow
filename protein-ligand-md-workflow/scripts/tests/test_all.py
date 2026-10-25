@@ -401,5 +401,33 @@ def main():
     return 1 if failed else 0
 
 
+
+# =========================================================================
+# 8. 报告与作图的硬性约束(这两处出过真实故障, 加回归守卫)
+# =========================================================================
+@case("报告: make_report.py 具备渲染界面分析页所需的全部要素")
+def t_report_interface_page():
+    txt = read(SKILL / "scripts" / "make_report.py")
+    check(re.search(r"^import json\s*$", txt, re.M),
+          "make_report.py 缺少 import json(会让界面分析静默丢失)")
+    check("st_h2 = ParagraphStyle(" in txt,
+          "make_report.py 未定义 st_h2 样式(渲染界面残基表会崩溃)")
+    check(re.search(r'\("interface_map\.png",\s*"interface_map\.png"', txt),
+          "FIGURES 里 interface_map.png 的 png 字段是 None, 界面热图不会进报告")
+    check(re.search(r'\("dssp\.png",\s*"dssp\.png"', txt),
+          "FIGURES 里 dssp.png 的 png 字段是 None, 二级结构图不会进报告")
+
+
+@case("分析: Ramachandran 用散点图, 脚本路径不依赖调用者")
+def t_rama_scatter():
+    txt = read(SKILL / "scripts" / "analyze.sh")
+    check("SCRIPT_DIR=" in txt, "analyze.sh 没有定义 SCRIPT_DIR")
+    check("plot_rama.py" in txt, "analyze.sh 没有调用 plot_rama.py")
+    check(re.search(r'python3\s+"?\$SCRIPT_DIR/plot_rama\.py"?', txt),
+          "analyze.sh 里 plot_rama.py 的路径没用 $SCRIPT_DIR, 调用时会找不到脚本")
+    check(not re.search(r'python3\s+"/scripts/plot_rama\.py"', txt),
+          "analyze.sh 里 plot_rama.py 的路径写成了 /scripts/... 绝对路径")
+
+
 if __name__ == "__main__":
     sys.exit(main())

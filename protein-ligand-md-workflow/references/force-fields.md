@@ -23,6 +23,7 @@
 - [3. 蛋白力场 × 水模型 配对表](#3-蛋白力场--水模型-配对表)
 - [4. 各力场必须配套的 mdp 参数](#4-各力场必须配套的-mdp-参数)
   - [4.3 CHARMM27 与 CHARMM36 到底差在哪](#43-charmm27-与-charmm36-到底差在哪本机逐项实测)
+  - [4.5 小分子配体参数化：GAFF 与 CGenFF 怎么选](#45-小分子配体参数化gaff-与-cgenff-怎么选)
 - [5. 参数转换细节（AMBER → GROMACS）](#5-参数转换细节amber--gromacs)
 - [6. gmx_MMPBSA 1.7.0 里与力场有关的参数](#6-gmx_mmpbsa-170-里与力场有关的参数)
 - [7. 推荐配方与完整命令](#7-推荐配方与完整命令)
@@ -450,6 +451,64 @@ CC-CT2-NH1-C :  k = 0.16736  →  8.368      (5 倍)
 | 要建糖脂 / 醚连接脂质 | 用 **CHARMM-GUI** 建模产出 GROMACS 拓扑（段名补丁会让 ethers 末端补丁失效） |
 | 做 MM/PBSA 结合自由能 | 优先 **AMBER99SB + GAFF**（本 skill 默认）；CHARMM 体系要用 `PBRadii = 7`（charmm_radii） |
 | 复现某篇论文 | 严格照抄论文用的力场，不要"挑更新的" |
+### 4.5 小分子配体参数化：GAFF 与 CGenFF 怎么选
+
+蛋白用 CHARMM36 时，配体**必须**也用 CHARMM 体系的小分子力场才自洽 ——
+这就是 **CGenFF**（CHARMM General Force Field）。
+
+| 配体参数 | 适用场景 | 工具 |
+|---|---|---|
+| **GAFF** | 蛋白用 **AMBER/OPLS** 时（**本 skill 默认**） | `acpype`（本地，全自动） |
+| **CGenFF** | 蛋白用 **CHARMM36/CHARMM27** 时 | ParamChem 服务器 → `.str` → `charmm2gmx` 转换 |
+| **SILCS-Bio** | CHARMM 体系 + 药物样小分子 | SILCS 官方流程 |
+
+> ⚠️ **不要混用**：蛋白用 CHARMM36 而配体用 GAFF，或蛋白用 AMBER 而配体用 CGenFF，
+> 两套参数的电荷模型与 LJ 假设不同，混合体系的能量没有意义。
+
+#### CGenFF 的实际操作路径（**作为外部依赖，不集成进本 skill**）
+
+```bash
+# 1) 准备带氢的 mol2 (CGenFF 要求 3D 坐标 + 显式氢)
+obabel -imol2 ligand.mol2 -omol2 -O ligand_h.mol2 --addtotitle H
+
+# 2) 上传到 ParamChem (https://parachem.nd.edu) 生成 .str 文件
+#    记录返回的 penalty score: < 1 视为合理, 1~2 需检查, > 2 建议改化学
+
+# 3) 用官方 charmm2gmx 转成 GROMACS 拓扑
+#    (脚本来自 E. Prabhu Raman / J. Lemkul, 许可证 AGPL-3.0,
+#     请自行从 https://github.com/charmm2gmx 获取)
+python charmm2gmx.py DRUG ligand_h.mol2 ligand.str /path/to/charmm36.ff
+#    产出: drug.itp / drug.prm / drug.top / drug_ini.pdb
+
+# 4) 合并进蛋白拓扑(与 merge_gaff_ff.py 同思路), 再走正常的溶剂化/平衡流程
+```
+
+#### ⚠️ 为什么本 skill 不直接集成 charmm2gmx
+
+`charmm2gmx` 的许可证是 **AGPL-3.0**，而本 skill 是 **GPL-3.0**。
+**AGPL-3.0 与 GPL-3.0 不兼容**，把该脚本直接打包进来会造成许可冲突。
+所以本 skill 只提供**上面的操作路径说明**，脚本本身请从官方仓库获取。
+
+#### CGenFF 评分 (penalty) 怎么读
+
+ParamChem 返回的 penalty score 是"该分子用通用参数时的偏差估计"：
+
+| penalty | 含义 | 建议 |
+|---|---|---|
+| < 1.0 | 参数很合适 | 直接用 |
+| 1.0 – 2.0 | 有个别原子类型不理想 | 检查目标键/角的参数，必要时手工修正 |
+| > 2.0 | 参数偏差明显 | 优先考虑改造化学（换取代基）而不是硬改参数 |
+
+手工修参数时，改的是 `drug.prm` 里的二面角/角度力常数与平衡键长键角，
+改完要重新跑 `charmm2gmx` 生成 `.itp`。
+
+#### 相关引用
+
+- Vanommeslaeghe et al., *CGenFF: A generic force field for drug-like molecules*, J. Chem. Theory Comput. 6, 199 (2010)
+- Raman et al., *charmm2gmx*, https://github.com/charmm2gmx
+- 参考 PyMACS 的整体思路（CHARMM36 + CGenFF 自动化）:
+  Schulz, Reynolds & Schürer, *PyMACS: A Python-Based Automation Suite for GROMACS Molecular Dynamics Setup, Simulation, and Analysis*,
+  **European Journal of Medicinal Chemistry** (2026) 316, 119038, doi:10.1016/j.ejmech.2026.119038
 ### 4.4 GROMOS（官方警告，定量计算请避开）
 
 GROMACS 官方手册原文：

@@ -42,6 +42,8 @@ GROMACS 2025, DuIvyTools, acpype, gmx_MMPBSA 1.7 and gnina 1.3.3.
 |---|---|---|
 | **0. 环境一键安装** | **`install_all.sh`** | **新机器上一条命令装齐全部依赖**：系统包 → GROMACS 2025 编译 → Python 工具链 → MM/PBSA 环境 → 对接工具 → PATH 持久化 → 自检。幂等，已装好的自动跳过 |
 | **0. 环境自检** | `setup_env.sh` | 一键检查 GROMACS / dit / acpype / obabel / vina / gnina / 分析库是否就位，并给出安装建议 |
+| **0. 统一入口** | **`mdflow.py`** | 一条命令跑完整个流水线：`verify → prepare → solvate → simulate → analyze → report`，任何子命令都能单独调用，支持 `--dry-run` 预演 |
+| **0. 结果报告** | **`make_report.py`** | 把分析结果汇总成**带目录的 PDF 报告**（封面 + 关键指标表 + 配体 2D 结构 + 每张图一页 + 方法说明），可直接进论文补充材料；无 reportlab 时自动降级为 HTML |
 | **0.5 力场选型** | `references/force-fields.md` | 本机可用力场清单、选型决策树、水模型配对表、CHARMM36 官方强制 mdp、AMBER→GROMACS 转换细节 |
 | **1. 分子对接** | `dock_ligand.sh` | gnina（Vina 打分 + CNN 深度学习重打分）把配体送进口袋；自动定盒子、转 PDBQT |
 | **2. 配体参数化** | `setup_ligand.sh` | **SMILES → 3D → GAFF 参数 → 力场合并 → 复合物组装**，一条命令 |
@@ -52,6 +54,7 @@ GROMACS 2025, DuIvyTools, acpype, gmx_MMPBSA 1.7 and gnina 1.3.3.
 | **7. 生产 MD** | `assets/mdp/md.mdp` | 长程轨迹，可选输出组间能量项用于结合能分析 |
 | **8. MM/PBSA** | `run_mmpbsa.sh` | gmx_MMPBSA 1.7.0 结合自由能 + 逐残基能量分解，自动汇总结果 |
 | **9. 结果分析** | `analyze.sh` | RMSD / RMSF / 能量 / 二级结构 / Ramachandran / 自由能面，批量出图 |
+| **10. 断点续跑** | `run_simulation.sh --resume` | 长模拟被中断/超时时，从 `md.cpt` 检查点续跑（`-cpi` + `-append`，轨迹连续不覆盖）；`--restart` 可强制重跑 |
 
 **特色**
 
@@ -86,6 +89,8 @@ protein-ligand-md-workflow/
     └── scripts/               ← 可直接执行的一键脚本
         ├── install_all.sh     一键安装全部环境(新机器首选)
     ├── setup_env.sh       环境自检
+    ├── mdflow.py          统一命令行入口(verify/prepare/solvate/simulate/analyze/report)
+    ├── make_report.py     生成 PDF 报告(figurebook)
         ├── setup_ligand.sh    配体一条命令（SMILES → 复合物）
         ├── setup_mmpbsa.sh    安装 gmx_MMPBSA 环境
         ├── merge_gaff_ff.py   GAFF 力场合并
@@ -111,7 +116,8 @@ protein-ligand-md-workflow/
 | **AutoDock Vina** | 1.2.7 | 备选对接引擎 |
 | **Open Babel** | 3.1+ | 格式转换（注意 3.x 的 `-o` / `-O` 语义变了） |
 | **meeko** | 0.7+ | 受体 PDBQT 制备（走 Vina 路线时需要） |
-| **Python 库** | — | `numpy` `scipy` `matplotlib` `pandas` `MDAnalysis` `mdtraj` |
+| **Python 库** | — | `numpy` `scipy` `matplotlib` `pandas` `MDAnalysis` `mdtraj` `rdkit` `meeko` |
+| **报告生成** | reportlab ≥4 | `reportlab` `svglib` `pypdf`；缺失时 `make_report.py` 自动降级为 HTML |
 
 **硬件建议**：8 核以上、16 GB 内存可跑中等体系；生产 MD 建议用 `gmx_mpi` 多进程。
 NVIDIA GPU 可显著加速 `mdrun`；对接用 `--device 0` 加速 CNN 打分。
@@ -237,6 +243,21 @@ bash ~/.codex/skills/protein-ligand-md-workflow/scripts/setup_mmpbsa.sh
 ---
 
 ## 快速开始
+
+### 最短路径：统一入口 `mdflow.py`
+
+```bash
+SKILL=~/.codex/skills/protein-ligand-md-workflow
+
+mdflow.py prepare --receptor rec.pdb --ligand-file lig.mol2 --workdir proj \
+                  --ff amber99sb --water tip3p
+mdflow.py solvate  --workdir proj --box 3.0
+mdflow.py simulate --workdir proj --nsteps 50000000 --resume
+mdflow.py analyze  --workdir proj --prot Protein --lig LIG
+mdflow.py report   --workdir proj --title "KRAS G12D - Sotorasib"
+```
+
+任何一步都可以先加 `--dry-run` 看会执行什么；`mdflow.py info` 打印流水线说明。
 
 ### 最短路径：一条命令从 SMILES 走到复合物
 
@@ -458,6 +479,30 @@ bash analyze.sh <工作目录>
 2. **`dit xvg_energy_compute`** —— 旧式相减法，输入必须恰好 5 列且顺序为
    `Time, LJ(SR), Disper.corr., Coulomb(SR), Coul.recip.`，
    对应 `gmx energy` 选能量项 **7, 8, 9, 10**。
+
+### 7. PDF 报告（`scripts/make_report.py`）
+
+```bash
+bash ~/.codex/skills/protein-ligand-md-workflow/scripts/make_report.py <工作目录> \
+     --title "我的体系" --ligand-file lig.mol2
+```
+
+产出 `<工作目录>/analysis/report.pdf`（约 850 KB，11 页）：
+
+| 页 | 内容 |
+|---|---|
+| 1 | 封面：标题、体系目录、生成时间、GROMACS 版本、轨迹文件 |
+| 2 | 关键指标摘要表（RMSD / RMSF / Rg / SASA / 氢键 / ΔG_bind），数值**直接解析自 .xvg 与 mmpbsa.out**，不二次计算 |
+| 3 | 配体 2D 结构式（rdkit 绘制） |
+| 4–10 | 每张分析图一页，带图题与结果解读 |
+| 11 | 方法与参数、引用提示 |
+
+选项：`--html` 强制输出 HTML；`--page-size landscape` 出横向 PDF；
+`--no-ligand` 不画配体结构。
+
+> **中文字体**：优先用系统的 Noto CJK / 文泉驿，找不到则自动用 reportlab 内置的
+> `STSong-Light`（无需额外字体文件），不会出现方块字。
+> 没装 reportlab 时脚本自动降级成 HTML，保证总能出报告。
 
 ---
 

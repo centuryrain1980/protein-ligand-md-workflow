@@ -197,6 +197,7 @@ fi
 # ---------- 3. Python 包 ----------
 step "3. Python 分析与参数化工具"
 PIP_PKGS="DuIvyTools acpype MDAnalysis mdtraj meeko rdkit gemmi ProDy numpy scipy pandas matplotlib"
+# reportlab/svglib 用于生成 PDF 报告(scripts/make_report.py); pypdf 用于校验 PDF
 # rich 在 Ubuntu 26.04 由 Debian 托管, 直接装会被拒; --ignore-installed 强制覆盖
 pip_install() {
   python3 -m pip install --break-system-packages --ignore-installed rich \
@@ -206,7 +207,8 @@ if python3 -c "import acpype, MDAnalysis, mdtraj, meeko" >/dev/null 2>&1; then
   log "Python 包已就绪 (acpype / MDAnalysis / mdtraj / meeko 均可导入)"
 else
   echo "  安装: $PIP_PKGS"
-  pip_install $PIP_PKGS || die "pip 安装失败 (可换镜像: --mirror https://pypi.org/simple)"
+  pip_install $PIP_PKGS reportlab svglib pypdf \
+    || die "pip 安装失败 (可换镜像: --mirror https://pypi.org/simple)"
   log "Python 包安装完成"
 fi
 python3 - <<'PY' 2>/dev/null || true

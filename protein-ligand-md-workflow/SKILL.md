@@ -44,6 +44,7 @@ description: 蛋白-配体复合物的分子动力学全流程——分子对接
 | 5 平衡 | EM → NVT → NPT | `references/equilibration.md` |
 | 6 生产 MD | 长程轨迹 | `references/equilibration.md` |
 | 7 结果分析 | RMSD/能量/二级结构/FEL/图表 | `references/analysis.md` |
+| 7.5 结果报告 | 把分析结果汇总成带目录的 PDF（封面+指标表+配体2D+每图一页） | `scripts/make_report.py` |
 | 8 结合自由能 | MM/PBSA (gmx_MMPBSA) | `references/mmpbsa.md` |
 
 **GROMACS 2025 的命令参数有大量变更**（`editconf -center` 变成向量、`grompp` 去掉 `-ff`、警告变错误、`genbox`/`tprconv` 被移除……）。凡是在 GROMACS 2025 上报参数错误或命令卡死，**先读 `references/gromacs-2025-api.md`**，不要照搬旧教程。
@@ -141,6 +142,13 @@ gmx mdrun -s md.tpr  -deffnm md  -ntmpi 1 -ntomp 6 -pin on -x md.xtc
   **不能**只看 `micromamba env list` 的名字——它的输出行首有两个空格，
   `grep -qE "^mmpbsa"` 匹配不到，会误判成"不存在"从而触发重建。
   `scripts/setup_mmpbsa.sh` 已按此修正。
+- **生产 MD 被中断后用 `--resume` 续跑**：`run_simulation.sh <dir> <nsteps> --resume` 会用
+  `-cpi md.cpt -append` 从检查点继续并**追加**到原轨迹（不会覆盖）。
+  想彻底重跑用 `--restart`（会先删掉旧的 `md.*` 产物）。
+  不带这两个参数时默认从头跑，会覆盖旧轨迹。
+- **复合物拓扑 `complex.top` 里写的是合并力场目录的绝对路径**，
+  所以**整个工作目录要整体保留/拷贝**，只拷 `complex.top` 到别处会导致
+  `grompp` 找不到力场文件。
 - **MM/PBSA 的 `mmpbsa.in` 不要写 `forcefields` / `protein_forcefield` /
   `ligand_forcefield` / `ions_parameters`**：gmx_MMPBSA 1.7.0 官方明确这些是 legacy 变量，
   新文件不要加；`source_force_field` 只用于来源标注，不会切换力场。
@@ -171,6 +179,8 @@ DuIvyTools 的 `dit` 命令负责 xvg/xpm 的可视化与后处理，`scripts/an
 - `assets/mdp/` —— 已修正的 em/ions/nvt/npt/md 参数模板（AMBER/OPLS 通用）
 - `assets/mdp/charmm36_*.mdp` —— CHARMM36 专用模板（官方 10 项强制参数已配好）
 - `scripts/install_all.sh` —— **一键安装全部运行环境**（系统包 → GROMACS 2025 编译 → Python 工具链 → MM/PBSA 环境 → 对接工具 → PATH 持久化 → 自检），幂等，新机器首选
+- `scripts/mdflow.py` —— **统一命令行入口**：`verify / prepare / solvate / simulate / analyze / mmpbsa / report / all`，支持 `--dry-run` 预演
+- `scripts/make_report.py` —— 生成 PDF 报告（figurebook）；无 reportlab 时自动降级为 HTML
 - `scripts/setup_env.sh` —— 环境自检与依赖安装
 - `scripts/merge_gaff_ff.py` —— 把 GAFF 配体原子类型并入蛋白力场（GROMACS 只允许一个 atomtypes 段，必须合并）
 - `scripts/assemble_complex.py` —— 蛋白 + 配体 → 复合物坐标与拓扑（含残基号/原子序号重编）

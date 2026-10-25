@@ -42,7 +42,7 @@ description: 蛋白-配体复合物的分子动力学全流程——分子对接
 | 3 配体参数化 | GAFF/AC 配体电荷与拓扑、力场合并 | `references/system-setup.md` |
 | 4 组装与溶剂化 | 复合物合并、溶剂化、加离子、索引组 | `references/system-setup.md` |
 | 5 平衡 | EM → NVT → NPT | `references/equilibration.md` |
-| 6 生产 MD | 长程轨迹 | `references/equilibration.md` |
+| 6 生产 MD | 长程轨迹（支持 `--resume` 断点续跑、JSON 计划多阶段） | `references/equilibration.md` |
 | 7 结果分析 | RMSD/能量/二级结构/FEL/图表 | `references/analysis.md` |
 | 7.5 结果报告 | 把分析结果汇总成带目录的 PDF（封面+指标表+配体2D+每图一页） | `scripts/make_report.py` |
 | 8 结合自由能 | MM/PBSA (gmx_MMPBSA) | `references/mmpbsa.md` |
@@ -142,6 +142,12 @@ gmx mdrun -s md.tpr  -deffnm md  -ntmpi 1 -ntomp 6 -pin on -x md.xtc
   **不能**只看 `micromamba env list` 的名字——它的输出行首有两个空格，
   `grep -qE "^mmpbsa"` 匹配不到，会误判成"不存在"从而触发重建。
   `scripts/setup_mmpbsa.sh` 已按此修正。
+- **多阶段平衡用 JSON 计划驱动**：`run_simulation.sh <dir> --plan plan.json`。
+  计划里的 `continuation` 是 **mdp 里的选项**（`gmx grompp` 命令行没有 `-c yes`，
+  那里的 `-c` 是坐标文件），脚本通过改写 mdp 实现。
+  计划阶段的 `name` 必须唯一，否则产物会互相覆盖。
+- **力场建拓扑失败会自动回退**：`mdflow.py prepare --ff-list "amber99sb:tip3p,charmm36:tip3p"`，
+  前一个失败就换下一个（CHARMM36 的 classic / ljpme 两个变体参数不同，某些配体只在其中一个下可用）。
 - **生产 MD 被中断后用 `--resume` 续跑**：`run_simulation.sh <dir> <nsteps> --resume` 会用
   `-cpi md.cpt -append` 从检查点继续并**追加**到原轨迹（不会覆盖）。
   想彻底重跑用 `--restart`（会先删掉旧的 `md.*` 产物）。
@@ -181,6 +187,8 @@ DuIvyTools 的 `dit` 命令负责 xvg/xpm 的可视化与后处理，`scripts/an
 - `scripts/install_all.sh` —— **一键安装全部运行环境**（系统包 → GROMACS 2025 编译 → Python 工具链 → MM/PBSA 环境 → 对接工具 → PATH 持久化 → 自检），幂等，新机器首选
 - `scripts/mdflow.py` —— **统一命令行入口**：`verify / prepare / solvate / simulate / analyze / mmpbsa / report / all`，支持 `--dry-run` 预演
 - `scripts/make_report.py` —— 生成 PDF 报告（figurebook）；无 reportlab 时自动降级为 HTML
+- `assets/plan/*.json` —— JSON 多阶段平衡计划（default / gentle / quick），用 `run_simulation.sh --plan` 驱动
+- `scripts/tests/run_tests.sh` —— 回归测试（19 个用例：语法 / mdp 参数 / MM/PBSA 变量 / JSON 计划 / 文档一致性 / 隐私 / 许可）
 - `scripts/setup_env.sh` —— 环境自检与依赖安装
 - `scripts/merge_gaff_ff.py` —— 把 GAFF 配体原子类型并入蛋白力场（GROMACS 只允许一个 atomtypes 段，必须合并）
 - `scripts/assemble_complex.py` —— 蛋白 + 配体 → 复合物坐标与拓扑（含残基号/原子序号重编）

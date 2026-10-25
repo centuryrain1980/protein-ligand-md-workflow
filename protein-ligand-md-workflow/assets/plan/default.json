@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "description": "默认四阶段: EM -> NVT -> NPT -> 生产 MD。与 run_simulation.sh 不带 --plan 时等价。",
+  "stages": [
+    {
+      "name": "em",
+      "mdp": "assets/mdp/em.mdp",
+      "struct": "solv_ions.gro",
+      "note": "能量最小化, 解除溶剂化带来的接触冲突"
+    },
+    {
+      "name": "nvt",
+      "mdp": "assets/mdp/nvt.mdp",
+      "struct": "em.gro",
+      "restraint": "solv_ions.gro",
+      "note": "NVT 升温+平衡, 蛋白位置受限"
+    },
+    {
+      "name": "npt",
+      "mdp": "assets/mdp/npt.mdp",
+      "struct": "nvt.gro",
+      "restraint": "solv_ions.gro",
+      "cpt": "nvt.cpt",
+      "note": "NTP 放开体积, 让体系在目标密度下松弛"
+    },
+    {
+      "name": "md",
+      "mdp": "assets/mdp/md.mdp",
+      "struct": "npt.gro",
+      "cpt": "npt.cpt",
+      "nsteps": 50000000,
+      "continue": true,
+      "note": "100 ns 生产 MD (50000000 步 x 2 fs)"
+    }
+  ]
+}

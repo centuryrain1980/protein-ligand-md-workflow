@@ -55,6 +55,9 @@ GROMACS 2025, DuIvyTools, acpype, gmx_MMPBSA 1.7 and gnina 1.3.3.
 | **8. MM/PBSA** | `run_mmpbsa.sh` | gmx_MMPBSA 1.7.0 结合自由能 + 逐残基能量分解，自动汇总结果 |
 | **9. 结果分析** | `analyze.sh` | RMSD / RMSF / 能量 / 二级结构 / Ramachandran / 自由能面，批量出图 |
 | **10. 断点续跑** | `run_simulation.sh --resume` | 长模拟被中断/超时时，从 `md.cpt` 检查点续跑（`-cpi` + `-append`，轨迹连续不覆盖）；`--restart` 可强制重跑 |
+| **11. 多阶段平衡** | `assets/plan/*.json` + `--plan` | 用 JSON 描述多阶段流程（阶段名 / mdp / 输入坐标 / 位置限制 / 检查点 / 步数 / continuation），预置 default / gentle / quick 三套 |
+| **12. 力场自动回退** | `mdflow.py --ff-list` | 给多个力场候选，前一个建拓扑失败就自动换下一个（如 `charmm36` → `charmm36_ljpme` → `charmm27`） |
+| **13. 回归测试** | `scripts/tests/` | 19 个用例覆盖脚本语法、mdp 关键参数、MM/PBSA 变量、JSON 计划、文档一致性、隐私与许可 |
 
 **特色**
 
@@ -91,6 +94,8 @@ protein-ligand-md-workflow/
     ├── setup_env.sh       环境自检
     ├── mdflow.py          统一命令行入口(verify/prepare/solvate/simulate/analyze/report)
     ├── make_report.py     生成 PDF 报告(figurebook)
+    └── tests/             回归测试(test_all.py + run_tests.sh)
+    assets/plan/           JSON 多阶段平衡计划(default / gentle / quick)
         ├── setup_ligand.sh    配体一条命令（SMILES → 复合物）
         ├── setup_mmpbsa.sh    安装 gmx_MMPBSA 环境
         ├── merge_gaff_ff.py   GAFF 力场合并
@@ -480,7 +485,67 @@ bash analyze.sh <工作目录>
    `Time, LJ(SR), Disper.corr., Coulomb(SR), Coul.recip.`，
    对应 `gmx energy` 选能量项 **7, 8, 9, 10**。
 
-### 7. PDF 报告（`scripts/make_report.py`）
+### 7. 多阶段平衡计划（`assets/plan/*.json`）
+
+默认流程是固定的 EM → NVT → NPT → 生产 MD；用 JSON 计划可以自定义：
+
+```bash
+bash <skill>/scripts/run_simulation.sh <工作目录> --plan <skill>/assets/plan/gentle.json
+# 或
+mdflow.py simulate --workdir proj --plan <skill>/assets/plan/quick.json
+```
+
+计划文件格式：
+
+```json
+{
+  "version": 1,
+  "description": "说明文字",
+  "stages": [
+    { "name": "em",   "mdp": "assets/mdp/em.mdp",  "struct": "solv_ions.gro" },
+    { "name": "nvt1", "mdp": "assets/mdp/nvt.mdp", "struct": "em.gro",
+      "restraint": "solv_ions.gro", "nsteps": 500000, "note": "第一轮 NVT" },
+    { "name": "md",   "mdp": "assets/mdp/md.mdp",  "struct": "npt2.gro",
+      "cpt": "npt2.cpt", "nsteps": 50000000, "continue": true }
+  ]
+}
+```
+
+| 字段 | 含义 |
+|---|---|
+| `name` | 阶段名，产物为 `<name>.tpr / .gro / .xtc`（**必须唯一**） |
+| `mdp` | mdp 模板；先按工作目录找，再按 skill 目录找 |
+| `struct` | 输入坐标，默认取上一阶段的 `.gro` |
+| `restraint` | 位置限制坐标（`-r`） |
+| `cpt` | 检查点（`-t`） |
+| `nsteps` | 覆盖 mdp 里的 `nsteps` |
+| `continue` | `true/false` → 写进 mdp 的 `continuation = yes/no` |
+
+> ⚠️ `continuation` 是 **mdp 里的选项**，`gmx grompp` 命令行**没有** `-c yes` 这种用法
+> （那里的 `-c` 是坐标文件），所以计划里是通过改写 mdp 实现的。
+
+预置三套：
+
+| 文件 | 用途 |
+|---|---|
+| `default.json` | 与默认四阶段等价 |
+| `gentle.json` | 六阶段：更长的限位平衡 + 两轮 NVT/NPT，适合新体系或大改动后重新平衡 |
+| `quick.json` | 冒烟测试：各阶段只跑几百步，验证环境与脚本通不通 |
+
+### 8. 力场自动回退（`mdflow.py --ff-list`）
+
+```bash
+mdflow.py prepare --receptor rec.pdb --ligand-file lig.mol2 --workdir proj   --ff-list "amber99sb:tip3p,charmm36:tip3p,charmm27:tips3p"
+```
+
+语法 `力场:水模型`，逗号分隔。**前一个建拓扑失败就自动换下一个**，
+并在日志里说明每次尝试的结果。
+
+> 用途：CHARMM36 体系里 `charmm36` 与 `charmm36_ljpme` 两个变体参数不同，
+> 某些配体在其中一个下参数缺失（报 `atom XXX not found`），
+> 装了 `install_all.sh --with-charmm36` 后两套都会就位，用 `--ff-list` 兜底。
+
+### 9. PDF 报告（`scripts/make_report.py`）
 
 ```bash
 bash ~/.codex/skills/protein-ligand-md-workflow/scripts/make_report.py <工作目录> \
@@ -550,6 +615,26 @@ bash ~/.codex/skills/protein-ligand-md-workflow/scripts/make_report.py <工作�
 | `editconf` 直接段错误 | 索引里有超出结构原子数的组 | 受体/配体索引改用**局部编号** |
 | 对接 affinity 全是 `0.00` | 盒子没对准口袋 | 核对盒子中心 |
 | `could not convert string to float: '*********'` | 某残基能量溢出（常见于 OPLS 拓扑转换） | 换 AMBER 系蛋白力场 |
+
+---
+
+## 开发与回归测试
+
+```bash
+bash <skill>/scripts/tests/run_tests.sh            # 全部用例
+bash <skill>/scripts/tests/run_tests.sh --fast     # 跳过需要真跑 GROMACS 的慢用例
+bash <skill>/scripts/tests/run_tests.sh -k mdp     # 只跑名字里含 mdp 的
+```
+
+19 个用例覆盖：
+
+- **脚本语法**：所有 `.sh` 过 `bash -n`，所有 `.py` 可编译
+- **mdp 关键参数**：CHARMM 模板必须含官方强制的 10 项；`rcoulomb` 必须等于 `rvdw`（Verlet+PME 要求）；通用模板必须用 `Linear`+`System`
+- **MM/PBSA 变量**：不得出现 legacy `forcefields`；`print_res` 用 `within 6`；`igb=8` 与 `PBRadii=4` 配套
+- **JSON 计划**：结构合法、引用的 mdp 存在、阶段名唯一
+- **文档一致性**：`SKILL.md` 的 `name` 与目录名一致；引用的文件都存在；7 篇 reference 齐全
+- **隐私**：不含 token / 私钥 / 硬编码的用户目录
+- **许可**：不得集成 AGPL-3.0 的 `charmm2gmx` 代码
 
 ---
 

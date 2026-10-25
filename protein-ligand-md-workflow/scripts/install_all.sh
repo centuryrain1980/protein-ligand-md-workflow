@@ -164,7 +164,7 @@ else
     echo "  下载源码包 (~90 MB)"
     DL="$BUILD_ROOT/gromacs-$GROMACS_VERSION.tar.gz"
     if [ ! -f "$DL" ]; then
-      curl -fL --retry 3 --connect-timeout 30 -o "$DL" \
+      curl -fL --retry 3 --connect-timeout 30 --max-time 900 -o "$DL" \
         "https://ftp.gromacs.org/pub/gromacs/gromacs-$GROMACS_VERSION.tar.gz" \
         || die "下载 GROMACS 源码失败"
     fi
@@ -246,7 +246,7 @@ else
     log "Vina 已就绪"
   else
     echo "  下载 Vina 1.2.7 ..."
-    if curl -fL --retry 3 --connect-timeout 30 -o "$HOME/apps/vina/vina-bin" "$VINA_URL"; then
+    if curl -fL --retry 3 --connect-timeout 30 --max-time 900 -o "$HOME/apps/vina/vina-bin" "$VINA_URL"; then
       chmod +x "$HOME/apps/vina/vina-bin"
       ln -sf "$HOME/apps/vina/vina-bin" "$HOME/bin/vina"
       log "Vina 安装完成"
@@ -266,7 +266,7 @@ else
     fi
   else
     echo "  下载 gnina 1.3.2 (CPU 版, 约 1.4 GB, 请耐心) ..."
-    if curl -fL --retry 3 --connect-timeout 30 -o "$HOME/apps/gnina/gnina_v1.3.2" "$GNINA_URL"; then
+    if curl -fL --retry 3 --connect-timeout 30 --max-time 900 -o "$HOME/apps/gnina/gnina_v1.3.2" "$GNINA_URL"; then
       chmod +x "$HOME/apps/gnina/gnina_v1.3.2"
       ln -sf "$HOME/apps/gnina/gnina_v1.3.2" "$HOME/bin/gnina"
       log "gnina 安装完成"
@@ -281,72 +281,114 @@ if [ "$WITH_CHARMM36" -eq 1 ]; then
   step "5b. CHARMM36 力场文件 (MacKerell)"
   CH36_URL="${CH36_URL:-https://mackerell.umaryland.edu/download.php?filename=CHARMM_ff_params_files/toppar_c36_feb26.tgz}"
   CDIR="$HOME/apps/charmm36"
+  SYSFF=/usr/local/share/gromacs/top
   mkdir -p "$CDIR" && cd "$CDIR" || die "无法创建 $CDIR"
-  if [ -d "$CDIR/charmm36.ff" ]; then
-    log "CHARMM36 力场文件已存在"
-  else
-    echo "  下载 toppar (~14 MB) ..."
-    if curl -fL --retry 3 --connect-timeout 30 -o toppar_c36.tgz "$CH36_URL"; then
-      tar xzf toppar_c36.tgz 2>/dev/null || true
-      FFGZ=$(find . -path "*gromacs*" -name "charmm36-*.ff.tgz" ! -name "*ljpme*" | head -1)
-      if [ -z "$FFGZ" ]; then
-        warn "包里没找到 charmm36-*.ff.tgz, 请到 $CH36_URL 手工下载"
+  # 两套变体一起装: classic 与 LJ-PME, 供 --ff-list 做自动回退
+  # (与 PyMACS 的做法一致: 同时提供两套, 建拓扑失败时换另一套)
+  install_variant() {
+    local pattern="$1" dest="$2"
+    local FFGZ SRCDIR
+    FFGZ=$(find . -path "*gromacs*" -name "$pattern" | head -1)
+    if [ -z "$FFGZ" ]; then
+      warn "包里没找到 $pattern, 跳过 $dest"
+      return 1
+    fi
+    rm -rf _tmp_$dest && mkdir _tmp_$dest
+    tar xzf "$FFGZ" -C _tmp_$dest 2>/dev/null || { warn "解压 $pattern 失败"; return 1; }
+    # 内层目录是 _tmp_$dest 的 depth-1 子目录
+    SRCDIR=$(find _tmp_$dest -mindepth 1 -maxdepth 1 -type d -name "*.ff" | head -1)
+    if [ -z "$SRCDIR" ]; then
+      warn "解压后没找到 *.ff 目录($pattern)"
+      return 1
+    fi
+    rm -rf "$CDIR/$dest"
+    cp -r "$SRCDIR" "$CDIR/$dest"
+    # 校验: 目标目录里应该直接是力场文件, 而不是又套一层
+    if [ -d "$CDIR/$dest" ] && [ ! -f "$CDIR/$dest/forcefield.itp" ]; then
+      warn "$dest 结构异常(可能多套了一层), 检查 $CDIR/$dest"
+    fi
+    # ---- 关键修复: ethers.n.tdb 的段名 [ MET1 ] / [ HYD1 ] 与 GROMACS 的 tdb 命名约定冲突 ----
+    #   CHARMM 里 MET1/HYD1 = "比标准残基多一个原子"的变体(醚连接糖脂头基)
+    #   GROMACS 里段名会被当成"给 MET/HYD 残基用的末端补丁",
+    #   于是把醚脂质的补丁误套到蛋白的 MET 上 -> 报
+    #   "atom C1 not found in buiding block 1MET while combining tdb and rtp"
+    #   改名(而不是删文件)可保留 ethers 的其余段
+    #   ⚠️ 改名必须"不以 MET/HYD 开头", 否则 GROMACS 按前缀匹配仍会误命中
+    if [ -f "$CDIR/$dest/ethers.n.tdb" ]; then
+      sed -i 's/\[ MET1 \]/[ ETHERS_MET1 ]/; s/\[ HYD1 \]/[ ETHERS_HYD1 ]/' \
+             "$CDIR/$dest/ethers.n.tdb"
+      log "已修复 $dest 的 ethers.n.tdb 段名冲突 (MET1/HYD1 -> ETHERS_MET1/ETHERS_HYD1)"
+    fi
+    log "$dest 已装到 $CDIR/$dest"
+    return 0
+  }
+
+  have_variant() { [ -d "$CDIR/$1.ff" ] || [ -d "$SYSFF/$1.ff" ]; }
+  if ! have_variant charmm36 || ! have_variant charmm36_ljpme; then
+    # 已有本地包就复用, 不用重下
+    if [ ! -s toppar_c36.tgz ]; then
+      echo "  下载 toppar (~14 MB) ..."
+      if curl -fL --retry 3 --connect-timeout 30 --max-time 900 -o toppar_c36.tgz "$CH36_URL"; then
+        echo "  下载完成"
       else
-        rm -rf _ff && mkdir _ff
-        tar xzf "$FFGZ" -C _ff
-        SRCDIR=$(find _ff -maxdepth 1 -type d -name "*.ff" | head -1)
-        if [ -z "$SRCDIR" ]; then
-          warn "解压后没找到 *.ff 目录"
-        else
-          rm -rf "$CDIR/charmm36.ff"
-          cp -r "$SRCDIR" "$CDIR/charmm36.ff"
-          # ---- 关键修复: ethers.n.tdb 的段名 [ MET1 ] / [ HYD1 ] 与 GROMACS 的 tdb 命名约定冲突 ----
-          #   CHARMM 里 MET1/HYD1 = "比标准残基多一个原子"的变体(醚连接糖脂头基)
-          #   GROMACS 里段名会被当成"给 MET/HYD 残基用的末端补丁",
-          #   于是把醚脂质的补丁误套到蛋白的 MET 上 -> 报
-          #   "atom C1 not found in buiding block 1MET while combining tdb and rtp"
-          #   改名(而不是删文件)可保留 ethers 的其余段
-          if [ -f "$CDIR/charmm36.ff/ethers.n.tdb" ]; then
-            sed -i 's/\[ MET1 \]/[ ETHERS_MET1 ]/; s/\[ HYD1 \]/[ ETHERS_HYD1 ]/' \
-                   "$CDIR/charmm36.ff/ethers.n.tdb"
-            log "已修复 ethers.n.tdb 的段名冲突 (MET1/HYD1 -> ETHERS_MET1/ETHERS_HYD1)"
-          fi
-          log "CHARMM36 力场文件已装到 $CDIR/charmm36.ff"
-
-          # ---- 优先装到系统力场库 ----
-          # 装到系统库的好处: 任何场景(交互/非交互/脚本/cron)都能直接用, 不需要 GMXLIB。
-          # ⚠️ 反过来, 如果系统库和 GMXLIB 里同时存在 charmm36.ff, GROMACS 会报
-          #    "Force field 'charmm36' occurs in 2 places, but not in the current directory."
-          #    所以两者只能留一个, 不能既装系统库又写 GMXLIB。
-          SYSFF=/usr/local/share/gromacs/top
-          if [ -d "$SYSFF" ] && [ -w "$SYSFF" ]; then
-            cp -r "$CDIR/charmm36.ff" "$SYSFF/" 2>/dev/null \
-              && log "已装到系统力场库 $SYSFF/charmm36.ff (推荐, 无需 GMXLIB)" \
-              || warn "写系统力场库失败, 改用 GMXLIB 方式"
-          elif [ -d "$SYSFF/charmm36.ff" ]; then
-            log "系统力场库已有 charmm36.ff, 不重复安装(避免重名冲突)"
-            rm -rf "$CDIR/charmm36.ff"
-          fi
-
-          # ---- 免 sudo 的兜底: 用 GMXLIB 指向用户目录 ----
-          if [ ! -d "$SYSFF/charmm36.ff" ]; then
-            GXL="export GMXLIB=$SYSFF:$CDIR"
-            for RC in "$HOME/.bashrc" "$HOME/.profile"; do
-              touch "$RC"
-              grep -qF "$GXL" "$RC" || printf '\n# protein-ligand-md-workflow: CHARMM36 力场目录\n%s\n' "$GXL" >> "$RC"
-            done
-            log "已把 GMXLIB 写入 ~/.bashrc 与 ~/.profile (免 sudo 方式)"
-            echo "        【推荐】之后用 sudo 装到系统库, 就不需要 GMXLIB 了:"
-            echo "          sudo cp -r $CDIR/charmm36.ff $SYSFF/"
-            echo "        (两者只能留一个, 否则 GROMACS 会报 'occurs in 2 places')"
-          else
-            echo "        系统库已有该力场, 不要再去设 GMXLIB, 否则会重名冲突。"
-          fi
-        fi
+        warn "下载失败: $CH36_URL"
+        rm -f toppar_c36.tgz
       fi
     else
-      warn "CHARMM36 下载失败: $CH36_URL"
+      log "复用已下载的 toppar_c36.tgz"
     fi
+    if [ -s toppar_c36.tgz ]; then
+      tar xzf toppar_c36.tgz 2>/dev/null || true
+      install_variant "charmm36-*.ff.tgz"        "charmm36.ff"
+      install_variant "charmm36_ljpme-*.ff.tgz"  "charmm36_ljpme.ff"
+    fi
+  else
+    log "CHARMM36 力场文件已存在 (classic + ljpme)"
+  fi
+
+  # ---- 优先装到系统力场库 ----
+  # 装到系统库的好处: 任何场景(交互/非交互/脚本/cron)都能直接用, 不需要 GMXLIB。
+  # ⚠️ 反过来, 如果系统库和 GMXLIB 里同时存在 charmm36.ff, GROMACS 会报
+  #    "Force field 'charmm36' occurs in 2 places, but not in the current directory."
+  #    所以两者只能留一个, 不能既装系统库又写 GMXLIB。
+  for v in charmm36 charmm36_ljpme; do
+    if [ -d "$CDIR/$v.ff" ] && [ -d "$SYSFF" ] && [ -w "$SYSFF" ]; then
+      cp -r "$CDIR/$v.ff" "$SYSFF/" 2>/dev/null \
+        && log "已装到系统力场库 $SYSFF/$v.ff (推荐, 无需 GMXLIB)" \
+        || warn "写系统力场库失败, 改用 GMXLIB 方式"
+    fi
+  done
+
+  # ---- 去重: 同一个力场只能存在于一处 ----
+  # GROMACS 查力场的顺序是 当前目录 -> GMXLIB -> 安装树;
+  # 同一个名字出现在多处(且不在当前目录)会报
+  #   "Force field 'charmm36' occurs in 2 places, but not in the current directory."
+  # 所以系统库已有的变体, 用户目录里就不能再留一份(哪怕要用 GMXLIB 指向用户目录)
+  for v in charmm36 charmm36_ljpme; do
+    if [ -d "$SYSFF/$v.ff" ] && [ -d "$CDIR/$v.ff" ]; then
+      rm -rf "$CDIR/$v.ff"
+      log "系统库已有 $v.ff, 移除用户目录的副本(避免 GROMACS 报 'occurs in 2 places')"
+    fi
+  done
+
+  # ---- 免 sudo 的兜底: 用 GMXLIB 指向用户目录 ----
+  # 注意: 两套变体要一起判断, 只要有一套没进系统库, 就得用 GMXLIB 指过去
+  NEED_GMXLIB=0
+  for v in charmm36 charmm36_ljpme; do
+    [ -d "$SYSFF/$v.ff" ] || NEED_GMXLIB=1
+  done
+  if [ $NEED_GMXLIB -eq 1 ]; then
+    GXL="export GMXLIB=$SYSFF:$CDIR"
+    for RC in "$HOME/.bashrc" "$HOME/.profile"; do
+      touch "$RC"
+      grep -qF "$GXL" "$RC" || printf '\n# protein-ligand-md-workflow: CHARMM36 力场目录\n%s\n' "$GXL" >> "$RC"
+    done
+    log "已把 GMXLIB 写入 ~/.bashrc 与 ~/.profile (免 sudo 方式)"
+    echo "        【推荐】之后用 sudo 装到系统库, 就不需要 GMXLIB 了:"
+    echo "          sudo cp -r $CDIR/charmm36.ff $SYSFF/"
+    echo "        (两者只能留一个, 否则 GROMACS 会报 'occurs in 2 places')"
+  else
+    echo "        系统库已有该力场, 不要再去设 GMXLIB, 否则会重名冲突。"
   fi
   warn "注意: 原始 charmm36.ff 需要打段名补丁才能用 (install_all.sh 已自动打好)。"
   warn "      若你手工下载, 一定要执行:"

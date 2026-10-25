@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "description": "冒烟测试用: 全流程各阶段只跑几百步, 用来验证环境和脚本通不通(不是有意义的模拟)。",
+  "stages": [
+    {
+      "name": "em",
+      "mdp": "assets/mdp/em.mdp",
+      "struct": "solv_ions.gro"
+    },
+    {
+      "name": "nvt",
+      "mdp": "assets/mdp/nvt.mdp",
+      "struct": "em.gro",
+      "restraint": "solv_ions.gro",
+      "nsteps": 500
+    },
+    {
+      "name": "npt",
+      "mdp": "assets/mdp/npt.mdp",
+      "struct": "nvt.gro",
+      "restraint": "solv_ions.gro",
+      "cpt": "nvt.cpt",
+      "nsteps": 500
+    },
+    {
+      "name": "md",
+      "mdp": "assets/mdp/md.mdp",
+      "struct": "npt.gro",
+      "cpt": "npt.cpt",
+      "nsteps": 1000,
+      "continue": true
+    }
+  ]
+}

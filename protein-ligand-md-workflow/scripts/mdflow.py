@@ -158,18 +158,60 @@ def cmd_dock(a):
     return 0
 
 
+def _ff_candidates(a):
+    """解析力场候选列表。
+
+    --ff-list 语法: "amber99sb:tip3p,charmm36:tip3p,charmm27:tips3p"
+    每项是 力场[:水模型]; 不写水模型时沿用 --water。
+    为空则退回单一候选 (--ff, --water)。
+    """
+    if not a.ff_list:
+        return [(a.ff, a.water)]
+    out = []
+    for item in a.ff_list.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if ":" in item:
+            ff, wat = item.split(":", 1)
+            out.append((ff.strip(), wat.strip() or a.water))
+        else:
+            out.append((item, a.water))
+    return out or [(a.ff, a.water)]
+
+
 def cmd_prepare(a):
     if not a.receptor or not a.ligand_file:
         die("prepare 需要 --receptor 和 --ligand-file")
     w = Path(a.workdir).resolve()
-    # 先 pdb2gmx
+    # 先 pdb2gmx(力场候选逐个尝试, 前一个失败就换下一个)
     topol = w / "topol.top"
+    cands = _ff_candidates(a)
     if not topol.is_file() or a.force:
-        log("pdb2gmx 建蛋白拓扑")
-        cmd = ["gmx", "pdb2gmx", "-f", a.receptor, "-o", "protein.gro",
-               "-i", "posre.itp", "-p", "topol.top",
-               "-ff", a.ff, "-water", a.water, "-ignh"]
-        run(cmd, a.dry_run, a.verbose, shell=False, cwd=w)
+        last = ""
+        for idx, (ff, wat) in enumerate(cands):
+            log(f"pdb2gmx 建蛋白拓扑 (候选 {idx+1}/{len(cands)}: {ff} + {wat})")
+            cmd = ["gmx", "pdb2gmx", "-f", a.receptor, "-o", "protein.gro",
+                   "-i", "posre.itp", "-p", "topol.top",
+                   "-ff", ff, "-water", wat, "-ignh"]
+            if a.dry_run:
+                run(cmd, True, a.verbose, cwd=w)
+                break
+            p = subprocess.run(cmd, cwd=w, text=True, capture_output=True,
+                               errors="replace")
+            out = (p.stdout or "") + (p.stderr or "")
+            if p.returncode == 0:
+                ok(f"力场 {ff} + 水模型 {wat} 可用")
+                a.ff, a.water = ff, wat
+                break
+            last = out
+            warn(f"力场 {ff} + 水模型 {wat} 失败, 尝试下一个候选")
+            if a.verbose:
+                print("\n".join(out.strip().splitlines()[-8:]))
+        else:
+            bad("所有力场候选都失败, 最后一次的报错:")
+            print("\n".join(last.strip().splitlines()[-12:]))
+            return 1
     else:
         log("topol.top 已存在, 跳过 pdb2gmx (加 --force 可重建)")
     # 再 setup_ligand.sh
@@ -217,6 +259,8 @@ def cmd_simulate(a):
     env = {"NTOMP": str(a.ntomp)}
     if a.resume:
         cmd.append("--resume")
+    if a.plan:
+        cmd += ["--plan", a.plan]
     run(cmd, a.dry_run, a.verbose, cwd=w, env=env)
     return 0
 
@@ -311,11 +355,16 @@ def main(argv=None):
     ap.add_argument("--box", type=float, default=3.0, help="溶剂化盒子边长 nm")
     ap.add_argument("--ff", default="amber99sb", help="蛋白力场(默认 amber99sb)")
     ap.add_argument("--water", default="tip3p", help="水模型(默认 tip3p)")
+    ap.add_argument("--ff-list", default=None,
+                    help="力场候选列表(逗号分隔), 如 'amber99sb:tip3p,charmm36:tip3p'; "
+                         "前一个建拓扑失败就自动换下一个")
     ap.add_argument("--prot", default="Protein", help="蛋白组名")
     ap.add_argument("--lig", default="LIG", help="配体组名")
     ap.add_argument("--nsteps", type=int, default=50000000, help="生产 MD 步数")
     ap.add_argument("--ntomp", type=int, default=6, help="OpenMP 线程数")
     ap.add_argument("--resume", action="store_true", help="从检查点续跑生产 MD")
+    ap.add_argument("--plan", default=None,
+                    help="JSON 多阶段计划文件(见 assets/plan/*.json), 会覆盖默认四阶段")
     ap.add_argument("--force", action="store_true", help="强制重建(即使已存在)")
     ap.add_argument("--startframe", type=int, default=1, help="MM/PBSA 起始帧")
     ap.add_argument("--endframe", type=int, default=50, help="MM/PBSA 结束帧")

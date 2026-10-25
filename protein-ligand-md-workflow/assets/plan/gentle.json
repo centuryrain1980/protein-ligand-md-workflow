@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "description": "温和六阶段: 更长的限位平衡 + 两轮 NVT/NPT, 适合新体系或大改动后的重新平衡。",
+  "stages": [
+    {
+      "name": "em",
+      "mdp": "assets/mdp/em.mdp",
+      "struct": "solv_ions.gro"
+    },
+    {
+      "name": "nvt1",
+      "mdp": "assets/mdp/nvt.mdp",
+      "struct": "em.gro",
+      "restraint": "solv_ions.gro",
+      "nsteps": 500000,
+      "note": "第一轮 NVT, 10 ps, 蛋白限位, 慢慢升温"
+    },
+    {
+      "name": "npt1",
+      "mdp": "assets/mdp/npt.mdp",
+      "struct": "nvt1.gro",
+      "restraint": "solv_ions.gro",
+      "cpt": "nvt1.cpt",
+      "nsteps": 250000,
+      "note": "第一轮 NPT, 5 ps, 仍然限位, 先把密度调到接近目标"
+    },
+    {
+      "name": "nvt2",
+      "mdp": "assets/mdp/nvt.mdp",
+      "struct": "npt1.gro",
+      "restraint": "solv_ions.gro",
+      "cpt": "nvt1.cpt",
+      "nsteps": 500000,
+      "note": "第二轮 NVT, 10 ps, 继续限位, 消除上一阶段的密度冲击"
+    },
+    {
+      "name": "npt2",
+      "mdp": "assets/mdp/npt.mdp",
+      "struct": "nvt2.gro",
+      "restraint": "solv_ions.gro",
+      "cpt": "nvt2.cpt",
+      "nsteps": 500000,
+      "note": "第二轮 NPT, 10 ps, 限位下彻底松弛"
+    },
+    {
+      "name": "md",
+      "mdp": "assets/mdp/md.mdp",
+      "struct": "npt2.gro",
+      "cpt": "npt2.cpt",
+      "nsteps": 50000000,
+      "continue": true,
+      "note": "100 ns 生产 MD"
+    }
+  ]
+}

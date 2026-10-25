@@ -1,23 +1,95 @@
 # protein-ligand-md-workflow
 
 > **蛋白-配体复合物的分子动力学全流程 Codex Skill**
-> 从 PDB 结构和配体 SMILES 出发，一条流水线走完：**分子对接 → 体系建模 → 力场选型 → 参数化 → 溶剂化 → 平衡 → 生产 MD → MM/PBSA 结合自由能 → 结果分析**。
 >
-> 底层工具：GROMACS 2025 + DuIvyTools(`dit`) + acpype + gmx_MMPBSA + gnina / AutoDock Vina。
-> 所有命令与参数**在 GROMACS 2025 上实测通过**，并把踩过的坑直接写进了配套文档。
+> 从 PDB 结构和配体 SMILES 出发，一条流水线走完：
+> **分子对接 → 体系建模 → 力场选型 → 参数化 → 溶剂化 → 平衡 → 生产 MD
+> → MM/PBSA 结合自由能 → 界面相互作用分析 → PDF 报告**。
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![GROMACS](https://img.shields.io/badge/GROMACS-2025.4%20AVX2_256-4c8bfc)](https://manual.gromacs.org/current/)
+[![Skill](https://img.shields.io/badge/Codex%20Skill-protein--ligand--md-informational)](https://github.com/centuryrain1980/protein-ligand-md-workflow)
+[![Tests](https://img.shields.io/badge/tests-20%2F20%20passing-success)](scripts/tests/)
+[![License](https://img.shields.io/badge/no%20AGPL%20code%20bundled-9cf3b0)](NOTICE)
+
+底层工具：**GROMACS 2025**（AVX2_256 自编译）+ **DuIvyTools**(`dit`) + **acpype** +
+**gmx_MMPBSA 1.7** + **gnina 1.3.3** / AutoDock Vina。
+所有命令与参数**在 GROMACS 2025 上实测通过**，踩过的坑直接写进了配套文档。
 
 **English summary** — A Codex skill that automates the end-to-end molecular-dynamics
 workflow for protein–ligand complexes: docking, system preparation, force-field
-selection, ligand parameterization (GAFF), solvation, equilibration, production MD,
-MM/PBSA binding free energies and trajectory analysis. Built and validated against
-GROMACS 2025, DuIvyTools, acpype, gmx_MMPBSA 1.7 and gnina 1.3.3.
+selection and auto-fallback, ligand parameterization (GAFF / CGenFF), solvation,
+multi-stage equilibration, production MD with checkpoint resume, MM/PBSA binding
+free energies, interface interaction classification (RIN), and a publication-ready
+PDF figurebook. Includes a one-command installer and a 20-case regression suite.
+Built and validated against GROMACS 2025, DuIvyTools, acpype, gmx_MMPBSA 1.7 and
+gnina 1.3.3.
+
+---
+
+## 这是给谁用的
+
+| 你的处境 | 它帮你解决什么 |
+|---|---|
+| 手里有一个 PDB + 一个 SMILES，想做结合自由能 | 一条命令走完从对接 ΔG_bind，不需要自己拼 13 步 GROMACS 流程 |
+| 被 GROMACS 2025 的 API 变更搞崩过 | 所有脚本都按 2025 实测校正；`references/gromacs-2025-api.md` 列出全部差异 |
+| 不知道该用哪个力场 / 水模型 | `references/force-fields.md` 给出决策树、水模型配对表，并给出 CHARMM27 与 CHARMM36 的逐项实测对比 |
+| 要写论文、要有能直接用的图 | 一键生成带目录的 PDF 报告（封面 + 指标表 + 配体 2D + 每图一页 + 方法说明） |
+| 长模拟总被中断 | `--resume` 从检查点续跑，轨迹连续不覆盖 |
+| 要给 Agent 用而不是自己敲命令 | 统一入口 `mdflow.py`，支持 `--dry-run` 预演，每个子命令都可单独调用 |
+
+---
+
+## 3 分钟上手
+
+```bash
+# 1) 装 skill
+python3 ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
+  --repo centuryrain1980/protein-ligand-md-workflow --path protein-ligand-md-workflow
+
+# 2) 装环境(系统包 + GROMACS 编译 + Python 工具链 + MM/PBSA + 对接工具, 幂等)
+bash ~/.codex/skills/protein-ligand-md-workflow/scripts/install_all.sh
+
+# 3) 跑流水线
+SK=~/.codex/skills/protein-ligand-md-workflow
+mdflow.py prepare --receptor rec.pdb --ligand-file lig.mol2 --workdir proj
+mdflow.py solvate  --workdir proj --box 3.0
+mdflow.py simulate --workdir proj --nsteps 50000000 --resume
+mdflow.py analyze  --workdir proj
+mdflow.py interface --workdir proj
+mdflow.py report   --workdir proj --title "我的体系"
+```
+
+---
+
+## 功能一览
+
+| 阶段 | 脚本 / 文件 | 产出 |
+|---|---|---|
+| 环境一键安装 | `install_all.sh` | 全部依赖就位 |
+| 环境自检 | `setup_env.sh` | 逐项 OK / WARN / FAIL |
+| 体系校验 | `mdflow.py verify` | 缺什么、下一步做什么 |
+| 蛋白拓扑 | `mdflow.py prepare` | `topol.top` / `protein.gro` |
+| 配体参数化 | `setup_ligand.sh` | GAFF 参数 + 复合物 `complex.top` |
+| 力场合并 | `merge_gaff_ff.py` | 合并力场目录 |
+| 溶剂化加离子 | `mdflow.py solvate` | `solv_ions.gro` |
+| 平衡 + 生产 MD | `mdflow.py simulate` | `md.xtc` / `md.edr` |
+| 多阶段平衡计划 | `assets/plan/*.json` | 按 JSON 驱动多阶段 |
+| 断点续跑 | `run_simulation.sh --resume` | 轨迹连续不覆盖 |
+| 轨迹分析 | `analyze.sh` | 8 张分析图 |
+| MM/PBSA | `run_mmpbsa.sh` | ΔG_bind + 逐残基分解 |
+| 界面相互作用 | `interface_analysis.py` | 事件级 CSV + RIN + 热图 |
+| PDF 报告 | `make_report.py` | `analysis/report.pdf`（约 11 页） |
+| 分子对接 | `dock_ligand.sh` | 多构象 SDF + CNN 重打分 |
+| 回归测试 | `scripts/tests/` | 20 个用例 |
 
 ---
 
 ## 目录
 
+- [这是给谁用的](#这是给谁用的)
+- [3 分钟上手](#3-分钟上手)
+- [功能一览](#功能一览)
 - [能做什么](#能做什么)
 - [目录结构](#目录结构)
 - [环境要求](#环境要求)
@@ -31,8 +103,10 @@ GROMACS 2025, DuIvyTools, acpype, gmx_MMPBSA 1.7 and gnina 1.3.3.
 - [分模块使用说明](#分模块使用说明)
 - [力场选型速查](#力场选型速查)
 - [常见问题（踩坑清单）](#常见问题踩坑清单)
+- [开发与回归测试](#开发与回归测试)
 - [与 GROMACS 2025 的兼容性说明](#与-gromacs-2025-的兼容性说明)
 - [致谢与许可证](#致谢与许可证)
+- [引用与复现](#引用与复现)
 
 ---
 
@@ -399,6 +473,14 @@ python3 merge_gaff_ff.py \
 > 代价：**醚连接糖脂的末端补丁失效**（那种体系请走 CHARMM-GUI）。
 
 **方案 A（推荐，已实测）—— `charmm36.ff` + 打补丁**
+
+> `install_all.sh --with-charmm36` 会自动下载 MacKerell 的 toppar 包，解出
+> **classic** 与 **ljpme** 两套变体、各自打好段名补丁，再装进系统力场库
+> （不需要手工 `sudo cp`）。
+>
+> 两套变体的参数略有差异，**某些配体只在其中一套下参数完整**。
+> 用 `mdflow.py --ff-list "charmm36:tip3p,charmm36_ljpme:tip3p"`
+> 可让建拓扑失败时自动换另一套。
 
 ```bash
 gmx pdb2gmx -f receptor.pdb -o protein.gro -i posre.itp -p topol.top \\

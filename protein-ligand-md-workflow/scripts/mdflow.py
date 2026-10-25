@@ -280,6 +280,17 @@ def cmd_mmpbsa(a):
     return 0
 
 
+def cmd_interface(a):
+    w = Path(a.workdir).resolve()
+    cmd = ["python3", str(SCRIPTS / "interface_analysis.py"), str(w)]
+    if a.lig_resname:
+        cmd += ["--lig", a.lig_resname]
+    if a.cutoff:
+        cmd += ["--cutoff", str(a.cutoff)]
+    run(cmd, a.dry_run, a.verbose, cwd=w)
+    return 0
+
+
 def cmd_report(a):
     w = Path(a.workdir).resolve()
     cmd = ["python3", str(SCRIPTS / "make_report.py"), str(w)]
@@ -300,6 +311,7 @@ def cmd_all(a):
         ("溶剂化+加离子", cmd_solvate),
         ("平衡+生产 MD", cmd_simulate),
         ("轨迹分析", cmd_analyze),
+        ("界面相互作用分析", cmd_interface),
         ("生成报告", cmd_report),
     ]
     for name, fn in steps:
@@ -319,6 +331,7 @@ def cmd_info(a):
   simulate  EM -> NVT -> NPT -> 生产 MD
   analyze   RMSD/RMSF/Rg/SASA/Rama/二级结构/能量, 出图
   mmpbsa    MM/PBSA 结合自由能与逐残基分解
+  interface 配体-蛋白界面残基与相互作用分类 (RIN)
   report    汇总成 PDF 报告 (analysis/report.pdf)
 
 典型用法:
@@ -338,6 +351,7 @@ COMMANDS = {
     "dock": cmd_dock, "prepare": cmd_prepare, "solvate": cmd_solvate,
     "simulate": cmd_simulate, "analyze": cmd_analyze, "mmpbsa": cmd_mmpbsa,
     "report": cmd_report, "all": cmd_all, "info": cmd_info,
+    "interface": cmd_interface,
 }
 
 
@@ -369,7 +383,11 @@ def main(argv=None):
     ap.add_argument("--startframe", type=int, default=1, help="MM/PBSA 起始帧")
     ap.add_argument("--endframe", type=int, default=50, help="MM/PBSA 结束帧")
     ap.add_argument("--title", help="报告标题")
+    ap.add_argument("--cutoff", type=float, default=None,
+                    help="界面接触距离上限 A(默认 4.5)")
     ap.add_argument("--html", action="store_true", help="报告输出 HTML 而非 PDF")
+    ap.add_argument("--lig-resname", dest="lig_resname",
+                    help="配体残基名(界面分析用; 默认自动识别)")
     ap.add_argument("--dry-run", action="store_true", help="只打印命令不执行")
     ap.add_argument("-v", "--verbose", action="store_true", help="打印子命令完整输出")
     a = ap.parse_args(argv)

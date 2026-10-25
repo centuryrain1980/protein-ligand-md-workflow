@@ -62,6 +62,23 @@ def t_bash_syntax():
     check(not bad, "shell 脚本语法错误: " + "; ".join(bad))
 
 
+@case("导入: 所有 Python 脚本能真正 import(抓被换行/吞字符造成的静默损坏)")
+def t_py_import():
+    """py_compile 只能抓语法错; 像 'from collections import Counte' 这种
+    被吞掉一个字符的情况语法是合法的, 只有真正 import 才会暴露。"""
+    import importlib.util
+    bad = []
+    for f in sorted(list((SKILL / "scripts").glob("*.py"))
+                    + list((SKILL / "scripts/tests").glob("*.py"))):
+        try:
+            spec = importlib.util.spec_from_file_location(f"_t_{f.stem}", str(f))
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+        except Exception as exc:
+            bad.append(f"{f.name}: {type(exc).__name__}: {exc}")
+    check(not bad, "脚本 import 失败: " + "; ".join(bad))
+
+
 @case("语法: 所有 Python 脚本可编译")
 def t_py_syntax():
     bad = []

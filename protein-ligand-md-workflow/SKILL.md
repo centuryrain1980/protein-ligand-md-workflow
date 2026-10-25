@@ -44,7 +44,8 @@ description: 蛋白-配体复合物的分子动力学全流程——分子对接
 | 5 平衡 | EM → NVT → NPT | `references/equilibration.md` |
 | 6 生产 MD | 长程轨迹（支持 `--resume` 断点续跑、JSON 计划多阶段） | `references/equilibration.md` |
 | 7 结果分析 | RMSD/能量/二级结构/FEL/图表 | `references/analysis.md` |
-| 7.5 结果报告 | 把分析结果汇总成带目录的 PDF（封面+指标表+配体2D+每图一页） | `scripts/make_report.py` |
+| 7.5 界面分析 | 界面残基识别、相互作用分类（氢键/盐桥/疏水/金属）、RIN 接触网络 | `scripts/interface_analysis.py` |
+| 7.6 结果报告 | 把分析结果汇总成带目录的 PDF（封面+指标表+配体2D+每图一页） | `scripts/make_report.py` |
 | 8 结合自由能 | MM/PBSA (gmx_MMPBSA) | `references/mmpbsa.md` |
 
 **GROMACS 2025 的命令参数有大量变更**（`editconf -center` 变成向量、`grompp` 去掉 `-ff`、警告变错误、`genbox`/`tprconv` 被移除……）。凡是在 GROMACS 2025 上报参数错误或命令卡死，**先读 `references/gromacs-2025-api.md`**，不要照搬旧教程。
@@ -155,6 +156,8 @@ gmx mdrun -s md.tpr  -deffnm md  -ntmpi 1 -ntomp 6 -pin on -x md.xtc
 - **复合物拓扑 `complex.top` 里写的是合并力场目录的绝对路径**，
   所以**整个工作目录要整体保留/拷贝**，只拷 `complex.top` 到别处会导致
   `grompp` 找不到力场文件。
+- **界面分析的相互作用分类要保守**：只有拿到完整几何证据（氢键要 D–H···A 距离与角度）
+  才标 Hydrogen Bond；判不出来一律记 Other Contact，不要臆测离子/π-π 等类型。
 - **MM/PBSA 的 `mmpbsa.in` 不要写 `forcefields` / `protein_forcefield` /
   `ligand_forcefield` / `ions_parameters`**：gmx_MMPBSA 1.7.0 官方明确这些是 legacy 变量，
   新文件不要加；`source_force_field` 只用于来源标注，不会切换力场。
@@ -187,6 +190,8 @@ DuIvyTools 的 `dit` 命令负责 xvg/xpm 的可视化与后处理，`scripts/an
 - `scripts/install_all.sh` —— **一键安装全部运行环境**（系统包 → GROMACS 2025 编译 → Python 工具链 → MM/PBSA 环境 → 对接工具 → PATH 持久化 → 自检），幂等，新机器首选
 - `scripts/mdflow.py` —— **统一命令行入口**：`verify / prepare / solvate / simulate / analyze / mmpbsa / report / all`，支持 `--dry-run` 预演
 - `scripts/make_report.py` —— 生成 PDF 报告（figurebook）；无 reportlab 时自动降级为 HTML
+- `scripts/interface_analysis.py` —— 配体-蛋白界面残基识别 + 相互作用分类 + RIN 接触网络
+  （判不出具体类型一律归 Other Contact，不臆测化学类型；每条事件带 ValidationStatus）
 - `assets/plan/*.json` —— JSON 多阶段平衡计划（default / gentle / quick），用 `run_simulation.sh --plan` 驱动
 - `scripts/tests/run_tests.sh` —— 回归测试（19 个用例：语法 / mdp 参数 / MM/PBSA 变量 / JSON 计划 / 文档一致性 / 隐私 / 许可）
 - `scripts/setup_env.sh` —— 环境自检与依赖安装

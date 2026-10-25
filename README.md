@@ -57,7 +57,8 @@ GROMACS 2025, DuIvyTools, acpype, gmx_MMPBSA 1.7 and gnina 1.3.3.
 | **10. 断点续跑** | `run_simulation.sh --resume` | 长模拟被中断/超时时，从 `md.cpt` 检查点续跑（`-cpi` + `-append`，轨迹连续不覆盖）；`--restart` 可强制重跑 |
 | **11. 多阶段平衡** | `assets/plan/*.json` + `--plan` | 用 JSON 描述多阶段流程（阶段名 / mdp / 输入坐标 / 位置限制 / 检查点 / 步数 / continuation），预置 default / gentle / quick 三套 |
 | **12. 力场自动回退** | `mdflow.py --ff-list` | 给多个力场候选，前一个建拓扑失败就自动换下一个（如 `charmm36` → `charmm36_ljpme` → `charmm27`） |
-| **13. 回归测试** | `scripts/tests/` | 19 个用例覆盖脚本语法、mdp 关键参数、MM/PBSA 变量、JSON 计划、文档一致性、隐私与许可 |
+| **13. 回归测试** | `scripts/tests/` | 20 个用例覆盖脚本语法、**实际 import**、mdp 关键参数、MM/PBSA 变量、JSON 计划、文档一致性、隐私与许可 |
+| **14. 界面相互作用分析** | **`interface_analysis.py`** | 配体-蛋白界面残基识别 + 相互作用分类（氢键/盐桥/疏水/金属配位）+ RIN 接触网络，输出事件级 CSV、汇总 JSON 与接触频率热图 |
 
 **特色**
 
@@ -94,6 +95,7 @@ protein-ligand-md-workflow/
     ├── setup_env.sh       环境自检
     ├── mdflow.py          统一命令行入口(verify/prepare/solvate/simulate/analyze/report)
     ├── make_report.py     生成 PDF 报告(figurebook)
+    ├── interface_analysis.py 界面残基与相互作用分类(RIN)
     └── tests/             回归测试(test_all.py + run_tests.sh)
     assets/plan/           JSON 多阶段平衡计划(default / gentle / quick)
         ├── setup_ligand.sh    配体一条命令（SMILES → 复合物）
@@ -545,7 +547,46 @@ mdflow.py prepare --receptor rec.pdb --ligand-file lig.mol2 --workdir proj   --f
 > 某些配体在其中一个下参数缺失（报 `atom XXX not found`），
 > 装了 `install_all.sh --with-charmm36` 后两套都会就位，用 `--ff-list` 兜底。
 
-### 9. PDF 报告（`scripts/make_report.py`）
+### 9. 界面相互作用分析（`scripts/interface_analysis.py`）
+
+```bash
+bash <skill>/scripts/interface_analysis.py <工作目录> --lig UNL
+# 或
+mdflow.py interface --workdir proj --lig-resname UNL
+```
+
+自动识别配体（非标准残基、非水/离子），逐帧扫描配体与蛋白的接触，并按**拓扑信息 + 几何证据**保守分类：
+
+| 类别 | 判定依据 | ValidationStatus |
+|---|---|---|
+| **Hydrogen Bond** | 给体–H···受体：D–H···A 距离 ≤ 2.5 Å 且角度 ≥ 120°，且供体/受体由元素+电荷+键连关系确定 | `confirmed` |
+| **Salt Bridge** | 带强正电残基（Arg/Lys/His）与带强负电残基（Asp/Glu）之间，距离 ≤ 4.0 Å | `confirmed` |
+| **Metal Coordination** | 金属离子（N/Mg/Zn/Fe/Cu/Ca…）距离 ≤ 2.8 Å | `confirmed` |
+| **Hydrophobic Contact** | 非极性重原子（C/S–C/S）在截断距离内 | `geometric` |
+| **Other Contact** | **以上都不满足时的保守兜底** | `proximity-only` |
+
+> **设计原则**（借鉴 PyMACS）：严格区分"空间接近"与"化学上说得通的事件"，
+> **判不出来就归 Other Contact，不臆测化学类型**；每条事件都带 `ValidationStatus`
+> 说明证据强度。
+
+输出（写到 `<工作目录>/analysis/`）：
+
+| 文件 | 内容 |
+|---|---|
+| `interface_events.csv` | 每帧每个相互作用一行：类别、证据状态、双方原子/元素/电荷、距离、角度、供受体 |
+| `interface_residues.csv` | 界面残基接触统计（按接触次数排序） |
+| `interface_rin.csv` | 残基-残基接触网络（RIN）及出现频次 |
+| `interface_summary.json` | 汇总：帧数、事件数、分类统计、Top 界面残基、截断参数 |
+| `interface_map.png` | 界面接触频率热图 |
+
+常用选项：`--cutoff`（一般接触距离，默认 4.5 Å）、`--hbond`、`--hbond-angle`、`--salt`、
+`--metal`、`--frames`（最多分析 N 帧）、`--stride`（抽帧）、`--lig`（配体残基名）。
+
+> π-π 相互作用**未单列**：配体侧的芳香环感知需要额外的环识别，
+> 为避免给出不可靠的结论，这里只做蛋白-蛋白芳香环的判定，
+> 配体侧统一归入 Other Contact。
+
+### 10. PDF 报告（`scripts/make_report.py`）
 
 ```bash
 bash ~/.codex/skills/protein-ligand-md-workflow/scripts/make_report.py <工作目录> \
@@ -626,9 +667,9 @@ bash <skill>/scripts/tests/run_tests.sh --fast     # 跳过需要真跑 GROMACS 
 bash <skill>/scripts/tests/run_tests.sh -k mdp     # 只跑名字里含 mdp 的
 ```
 
-19 个用例覆盖：
+20 个用例覆盖：
 
-- **脚本语法**：所有 `.sh` 过 `bash -n`，所有 `.py` 可编译
+- **脚本语法**：所有 `.sh` 过 `bash -n`，所有 `.py` 可编译，并且**逐个真正 import 一次**（能抓出被换行或吞字符造成的静默损坏，这类问题 `py_compile` 发现不了）
 - **mdp 关键参数**：CHARMM 模板必须含官方强制的 10 项；`rcoulomb` 必须等于 `rvdw`（Verlet+PME 要求）；通用模板必须用 `Linear`+`System`
 - **MM/PBSA 变量**：不得出现 legacy `forcefields`；`print_res` 用 `within 6`；`igb=8` 与 `PBRadii=4` 配套
 - **JSON 计划**：结构合法、引用的 mdp 存在、阶段名唯一
